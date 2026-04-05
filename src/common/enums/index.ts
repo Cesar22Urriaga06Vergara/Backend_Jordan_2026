@@ -1,0 +1,105 @@
+// Enums de Estados de Pedido
+export enum EstadoPedido {
+  PENDIENTE = 'PENDIENTE',
+  CARGADO_EN_RUTA = 'CARGADO_EN_RUTA',
+  ENTREGADO = 'ENTREGADO',
+  NO_ENTREGADO = 'NO_ENTREGADO',
+  DEVUELTO = 'DEVUELTO',
+  REPROGRAMADO = 'REPROGRAMADO',
+  CANCELADO = 'CANCELADO',
+}
+
+// Enums de Estados de Ruta
+export enum EstadoRuta {
+  CREADA = 'CREADA',
+  CARGADA = 'CARGADA',
+  EN_ENTREGA = 'EN_ENTREGA',
+  EN_LIQUIDACION = 'EN_LIQUIDACION',
+  LIQUIDADA = 'LIQUIDADA',
+  ANULADA = 'ANULADA',
+}
+
+// Enums de Intento de Entrega
+export enum EstadoIntentoEntrega {
+  COMPLETADO = 'COMPLETADO',
+  NO_COMPLETADO = 'NO_COMPLETADO',
+  CANCELADO = 'CANCELADO',
+}
+
+// Enums de Tipo de Pago
+export enum TipoPago {
+  EFECTIVO = 'EFECTIVO',
+  TRANSFERENCIA = 'TRANSFERENCIA',
+  PENDIENTE = 'PENDIENTE',
+}
+
+// Enums de Estado de Venta
+export enum EstadoVenta {
+  COMPLETADA = 'COMPLETADA',
+  PARCIAL = 'PARCIAL',
+  PENDIENTE = 'PENDIENTE',
+  CANCELADA = 'CANCELADA',
+}
+
+// Enums de Tipo de Cliente
+export enum TipoCliente {
+  TIENDA = 'TIENDA',
+  NEGOCIO = 'NEGOCIO',
+  DIRECTO = 'DIRECTO',
+  VEREDA = 'VEREDA',
+  FRECUENTE = 'FRECUENTE',
+}
+
+// Enums de Tipo de Labor
+export enum TipoLabor {
+  POR_JORNADA = 'POR_JORNADA',
+  POR_HORA = 'POR_HORA',
+  POR_PACA = 'POR_PACA',
+  MANUAL = 'MANUAL',
+  MIXTO = 'MIXTO',
+}
+
+// Enums de Tipo de Movimiento de Caja
+export enum TipoMovimientoCaja {
+  INGRESO_VENTA_EFECTIVO = 'INGRESO_VENTA_EFECTIVO',
+  INGRESO_VENTA_TRANSFERENCIA = 'INGRESO_VENTA_TRANSFERENCIA',
+  INGRESO_CARTERA_EFECTIVO = 'INGRESO_CARTERA_EFECTIVO',
+  INGRESO_CARTERA_TRANSFERENCIA = 'INGRESO_CARTERA_TRANSFERENCIA',
+  PAGO_TRABAJADOR = 'PAGO_TRABAJADOR',
+  ANTICIPOS = 'ANTICIPOS',
+  PRESTAMOS = 'PRESTAMOS',
+  OTROS_EGRESOS = 'OTROS_EGRESOS',
+  OTROS_INGRESOS = 'OTROS_INGRESOS',
+}
+
+export enum TipoTrabajador {
+  PERMANENTE = 'PERMANENTE',
+  TEMPORAL = 'TEMPORAL',
+  PREVENTISTA = 'PREVENTISTA',
+  DOMICILIARIO = 'DOMICILIARIO',
+  MIXTO = 'MIXTO',
+}
+
+// Enums de Tipo de Movimiento de Inventario
+export enum TipoMovimientoInventario {
+  DESPACHO_ENTREGA = 'DESPACHO_ENTREGA',
+  DESPACHO_VENTA_DIRECTA = 'DESPACHO_VENTA_DIRECTA',
+  DEVOLUCION = 'DEVOLUCION',
+  AJUSTE = 'AJUSTE',
+  PRODUCCION = 'PRODUCCION',
+  OTROS = 'OTROS',
+}
+
+// Enums de Tipo de Anticipo/Préstamo
+export enum TipoAnticipoPrestamo {
+  ANTICIPO = 'ANTICIPO',
+  PRESTAMO = 'PRESTAMO',
+}
+
+// Enums de Estado de Anticipo/Préstamo
+export enum EstadoAnticipoPrestamo {
+  ACTIVO = 'ACTIVO',
+  PAGADO_PARCIALMENTE = 'PAGADO_PARCIALMENTE',
+  PAGADO_COMPLETAMENTE = 'PAGADO_COMPLETAMENTE',
+  CANCELADO = 'CANCELADO',
+}

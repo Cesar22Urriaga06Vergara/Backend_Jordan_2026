@@ -1,0 +1,21 @@
+{
+  "runAt": "2026-04-03T16:41:34.571Z",
+  "apiBase": "http://localhost:3001/api",
+  "entities": {
+    "usuario": {
+      "id": 6,
+      "email": "qa.1775234494249@jordan.local",
+      "nombre": "QA Usuario 1775234494249"
+    },
+    "producto": {
+      "id": 13,
+      "codigo": "QA-P-34494249",
+      "nombre": "QA Producto 1775234494249"
+    },
+    "cliente": {
+      "id": 3,
+      "codigo": "QA-C-34494249",
+      "nombre": "QA Cliente 1775234494249"
+    }
+  }
+}
