@@ -35,4 +35,7 @@ export class CreateProductoDto {
   @IsOptional()
   @IsBoolean()
   activo?: boolean;
+
+  @IsOptional()
+  usuarioId?: number;
 }

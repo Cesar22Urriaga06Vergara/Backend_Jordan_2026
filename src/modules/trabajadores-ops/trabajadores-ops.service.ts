@@ -149,7 +149,7 @@ export class TrabajadoresOpsService {
         );
       }
 
-      const hoy = new Date(dto.fecha);
+      const hoy = this.parseFechaLocalToDate(dto.fecha);
       const prefix = `PAG-T-${hoy.getFullYear()}${String(hoy.getMonth() + 1).padStart(2, '0')}${String(hoy.getDate()).padStart(2, '0')}`;
       const count = await manager
         .createQueryBuilder(PagoTrabajador, 'p')
@@ -208,7 +208,7 @@ export class TrabajadoresOpsService {
     if (!trabajador) throw new NotFoundException(`Trabajador ${dto.trabajadorId} no encontrado`);
 
     return this.dataSource.transaction(async (manager) => {
-      const hoy = new Date(dto.fecha);
+      const hoy = this.parseFechaLocalToDate(dto.fecha);
       const prefix = `ANT-${hoy.getFullYear()}${String(hoy.getMonth() + 1).padStart(2, '0')}${String(hoy.getDate()).padStart(2, '0')}`;
       const count = await manager
         .createQueryBuilder(AnticipoPrestamo, 'a')

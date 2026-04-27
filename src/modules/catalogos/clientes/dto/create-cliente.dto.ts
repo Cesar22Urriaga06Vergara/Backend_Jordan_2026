@@ -55,4 +55,7 @@ export class CreateClienteDto {
   @IsOptional()
   @IsBoolean()
   activo?: boolean;
+
+  @IsOptional()
+  usuarioId?: number;
 }

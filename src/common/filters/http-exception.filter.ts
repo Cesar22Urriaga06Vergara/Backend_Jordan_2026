@@ -5,12 +5,16 @@ import {
   HttpException,
   HttpStatus,
   Logger,
+  Inject,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { AppLoggerService } from '@/common/services/logger.service';
 
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(GlobalExceptionFilter.name);
+
+  constructor(@Inject(AppLoggerService) private appLogger: AppLoggerService) {}
 
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
@@ -50,6 +54,30 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     if (status >= 500) {
       this.logger.error(
         `[${requestId}] ${request.method} ${request.url} -> ${status} ${message}`,
+      );
+      
+      // Log crítico en AppLoggerService
+      this.appLogger.logCriticalError(
+        `${request.method} ${request.url}`,
+        exception,
+        {
+          userId: (request as any).user?.id,
+          ip: request.ip,
+          method: request.method,
+          path: request.url,
+          statusCode: status,
+          body: request.body,
+        }
+      );
+    } else if (status >= 400) {
+      // Log de errores de cliente
+      this.appLogger.logValidationError(
+        request.url,
+        { status, message, errors },
+        {
+          userId: (request as any).user?.id,
+          ip: request.ip,
+        }
       );
     }
 

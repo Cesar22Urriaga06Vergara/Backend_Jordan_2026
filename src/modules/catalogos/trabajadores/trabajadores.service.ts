@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  Inject,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -15,6 +16,8 @@ import {
 } from '../../../database/entities';
 import { CreateTrabajadorDto } from './dto/create-trabajador.dto';
 import { UpdateTrabajadorDto } from './dto/update-trabajador.dto';
+import { AppLoggerService } from '../../../common/services/logger.service';
+import { AuditService } from '../../../common/services/audit.service';
 
 @Injectable()
 export class TrabajadoresService {
@@ -29,6 +32,9 @@ export class TrabajadoresService {
     private laborRepo: Repository<TrabajadorLabor>,
     @InjectRepository(PagoTrabajador)
     private pagoRepo: Repository<PagoTrabajador>,
+    @Inject(AppLoggerService)
+    private logger: AppLoggerService,
+    private auditService: AuditService,
   ) {}
 
   private async reconcileSaldos(trabajadores: Trabajador[]) {

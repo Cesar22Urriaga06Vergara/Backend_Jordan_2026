@@ -32,6 +32,7 @@ import {
   AbonoDeuda,
   CambioAuditoria,
   LogActividad,
+  ConfiguracionEmpresa,
 } from './entities';
 
 dotenv.config({ path: '.env.local' });
@@ -76,6 +77,7 @@ export const typeOrmConfig: TypeOrmModuleOptions = {
     AbonoDeuda,
     CambioAuditoria,
     LogActividad,
+    ConfiguracionEmpresa,
   ],
   synchronize: process.env.DB_SYNCHRONIZE === 'true',
   logging: process.env.NODE_ENV === 'development',

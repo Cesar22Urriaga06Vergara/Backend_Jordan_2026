@@ -55,4 +55,12 @@ export class UpdateClienteDto {
   @IsOptional()
   @IsBoolean()
   activo?: boolean;
+
+  @IsOptional()
+  usuarioId?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  razonCambio?: string;
 }

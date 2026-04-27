@@ -4,6 +4,7 @@ import {
   Post,
   Put,
   Patch,
+  Delete,
   Param,
   Body,
   Query,
@@ -71,5 +72,10 @@ export class ClientesController {
     @Body() dto: UpsertPrecioClienteDto,
   ) {
     return this.clientesService.upsertPrecio(id, dto);
+  }
+
+  @Delete(':id')
+  delete(@Param('id', ParseIntPipe) id: number) {
+    return this.clientesService.delete(id);
   }
 }

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MovimientoCaja } from '../../../database/entities';
@@ -44,9 +44,17 @@ export class EgresosService {
   }
 
   async findAll(page = 1, limit = 20, filtros?: BuscarEgresosDto) {
+    const tiposEgreso = [
+      TipoMovimientoCaja.OTROS_EGRESOS,
+      TipoMovimientoCaja.PAGO_TRABAJADOR,
+      TipoMovimientoCaja.ANTICIPOS,
+      TipoMovimientoCaja.PRESTAMOS,
+    ];
+
     const qb = this.movCajaRepo
       .createQueryBuilder('m')
-      .where('m.tipo = :tipo', { tipo: TipoMovimientoCaja.OTROS_EGRESOS });
+      .leftJoinAndSelect('m.trabajador', 't')
+      .where('m.tipo IN (:...tipos)', { tipos: tiposEgreso });
 
     if (filtros?.fecha) {
       const fechaStr = this.getFechaLocalISO(filtros.fecha);
@@ -81,6 +89,20 @@ export class EgresosService {
   }
 
   async registrar(dto: RegistrarEgresoDto, usuarioId?: number) {
+    // Validaciones críticas
+    if (!dto.concepto || !dto.concepto.trim()) {
+      throw new BadRequestException('El concepto es requerido');
+    }
+
+    const monto = Number(dto.monto);
+    if (isNaN(monto) || monto <= 0) {
+      throw new BadRequestException('El monto debe ser un número positivo');
+    }
+
+    if (monto > 99999999) {
+      throw new BadRequestException('El monto excede el límite permitido (máx: 99,999,999)');
+    }
+
     const fechaOperacion = this.buildFechaOperacion(dto.fecha);
     const numero = await this.generarNumero(fechaOperacion);
 
@@ -88,9 +110,9 @@ export class EgresosService {
       numero,
       tipo: TipoMovimientoCaja.OTROS_EGRESOS,
       medioPago: dto.medioPago ?? TipoPago.EFECTIVO,
-      monto: Number(dto.monto),
+      monto: monto,
       fecha: fechaOperacion,
-      concepto: dto.concepto,
+      concepto: dto.concepto.trim(),
       referencia: dto.referencia,
       observaciones: dto.observaciones,
       // Si no hay usuario autenticado, conservar trazabilidad en observaciones.

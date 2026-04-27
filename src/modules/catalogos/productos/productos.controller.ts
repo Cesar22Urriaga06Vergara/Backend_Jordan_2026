@@ -4,6 +4,7 @@ import {
   Post,
   Put,
   Patch,
+  Delete,
   Param,
   Body,
   Query,
@@ -59,5 +60,10 @@ export class ProductosController {
   @Patch(':id/toggle-activo')
   toggleActivo(@Param('id', ParseIntPipe) id: number) {
     return this.productosService.toggleActivo(id);
+  }
+
+  @Delete(':id')
+  delete(@Param('id', ParseIntPipe) id: number) {
+    return this.productosService.delete(id);
   }
 }

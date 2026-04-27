@@ -113,17 +113,35 @@ export class VentasService {
     if (!cliente) throw new NotFoundException(`Cliente ${dto.clienteId} no encontrado o inactivo`);
 
     return this.dataSource.transaction(async (manager) => {
+      // Validación: detalles no vacío
+      if (!dto.detalles || dto.detalles.length === 0) {
+        throw new BadRequestException('La venta debe tener al menos un producto');
+      }
+
       // Calcular totales
       let totalVenta = 0;
       const detallesData: Partial<DetalleVenta>[] = [];
 
       for (const item of dto.detalles) {
+        // Validación crítica: cantidad debe ser razonable
+        if (!item.cantidad || item.cantidad <= 0 || item.cantidad > 999) {
+          throw new BadRequestException(
+            `Cantidad inválida: ${item.cantidad}. Debe estar entre 1 y 999 unidades`,
+          );
+        }
+
         const producto = await this.productoRepo.findOne({
           where: { id: item.productoId, activo: true },
         });
         if (!producto) {
           throw new NotFoundException(`Producto ${item.productoId} no encontrado`);
         }
+        
+        // Validación: precio unitario coherente
+        if (item.precioUnitario < 0) {
+          throw new BadRequestException(`Precio unitario no puede ser negativo`);
+        }
+
         const subtotal = item.cantidad * item.precioUnitario;
         totalVenta += subtotal;
         detallesData.push({

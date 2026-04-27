@@ -29,6 +29,40 @@ import {
 } from '@/common/enums';
 
 // ============================================================================
+// CONFIGURACION DE EMPRESA
+// ============================================================================
+
+@Entity('configuracion_empresa')
+export class ConfiguracionEmpresa {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Column({ default: '' })
+  nombre: string;
+
+  @Column({ nullable: true })
+  nit: string;
+
+  @Column({ nullable: true })
+  direccion: string;
+
+  @Column({ nullable: true })
+  ciudad: string;
+
+  @Column({ nullable: true })
+  telefono: string;
+
+  @Column({ nullable: true })
+  email: string;
+
+  @Column({ nullable: true })
+  slogan: string;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
+}
+
+// ============================================================================
 // AUTENTICACION Y USUARIOS
 // ============================================================================
 

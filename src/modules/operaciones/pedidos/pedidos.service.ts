@@ -138,12 +138,20 @@ export class PedidosService {
 
     const detalles: DetallePedido[] = [];
     for (const item of dto.detalles) {
+      // Validación crítica: cantidad debe ser razonable
+      if (!item.cantidad || item.cantidad <= 0 || item.cantidad > 999) {
+        throw new BadRequestException(
+          `Cantidad inválida: ${item.cantidad}. Debe estar entre 1 y 999 unidades`,
+        );
+      }
+      
       const producto = await this.productoRepo.findOne({
         where: { id: item.productoId, activo: true },
       });
       if (!producto) {
         throw new NotFoundException(`Producto ${item.productoId} no encontrado o inactivo`);
       }
+      
       detalles.push(
         this.detalleRepo.create({
           pedidoId: savedPedido.id,
@@ -182,6 +190,20 @@ export class PedidosService {
       !dto.razonCancelacion
     ) {
       throw new BadRequestException('Se requiere razonCancelacion');
+    }
+
+    // Validación crítica: fecha reprogramación debe ser futura
+    if (estadoNuevo === EstadoPedido.REPROGRAMADO && dto.fechaReprogramacion) {
+      const fechaReprog = new Date(dto.fechaReprogramacion);
+      const ahora = new Date();
+      ahora.setHours(0, 0, 0, 0);
+      fechaReprog.setHours(0, 0, 0, 0);
+      
+      if (fechaReprog < ahora) {
+        throw new BadRequestException(
+          'La fecha de reprogramación debe ser futura (no puede ser hoy o pasada)',
+        );
+      }
     }
 
     Object.assign(pedido, {

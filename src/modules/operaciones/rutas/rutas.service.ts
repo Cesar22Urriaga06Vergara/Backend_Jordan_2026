@@ -231,6 +231,18 @@ export class RutasService {
       );
     }
 
+    // Validación crítica: al cargar o entregar, se requieren pedidos/items
+    if (estadoNuevo === EstadoRuta.CARGADA || estadoNuevo === EstadoRuta.EN_ENTREGA) {
+      const itemsExistentes = await this.itemRutaRepo.count({
+        where: { rutaId: id },
+      });
+      if (itemsExistentes === 0) {
+        throw new BadRequestException(
+          `No se puede pasar la ruta a ${estadoNuevo}: no tiene pedidos asignados`,
+        );
+      }
+    }
+
     // Al cargar en ruta, marcar pedidos como CARGADO_EN_RUTA
     if (estadoNuevo === EstadoRuta.CARGADA) {
       await this.pedidoRepo
