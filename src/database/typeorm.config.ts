@@ -40,11 +40,11 @@ dotenv.config({ path: '.env' });
 
 export const typeOrmConfig: TypeOrmModuleOptions = {
   type: 'mysql',
-  host: process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT ?? '3306', 10),
-  username: process.env.DB_USERNAME || 'root',
-  password: process.env.DB_PASSWORD || 'root',
-  database: process.env.DB_DATABASE || 'jordan',
+  host: process.env.DB_HOST || process.env.MYSQLHOST || 'localhost',
+  port: parseInt(process.env.DB_PORT || process.env.MYSQLPORT || '3306', 10),
+  username: process.env.DB_USERNAME || process.env.MYSQLUSER || 'root',
+  password: process.env.DB_PASSWORD || process.env.MYSQLPASSWORD || 'root',
+  database: process.env.MYSQL_DATABASE || 'hotel',
   entities: [
     Usuario,
     Producto,
