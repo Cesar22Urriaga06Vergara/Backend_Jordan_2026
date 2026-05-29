@@ -9,6 +9,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Response } from 'express';
+import type { CookieOptions } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { Request as ExpressRequest } from 'express';
 import { AuthService } from './auth.service';
@@ -23,6 +24,17 @@ interface RequestWithUser extends ExpressRequest {
     id: number;
     email: string;
     rol: string;
+  };
+}
+
+function authCookieOptions(maxAge?: number): CookieOptions {
+  const isProd = process.env.NODE_ENV === 'production';
+  return {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'lax',
+    path: '/api',
+    ...(maxAge ? { maxAge } : {}),
   };
 }
 
@@ -42,14 +54,7 @@ export class AuthController {
     this.logger.log(`Login attempt for email: ${loginDto.email}`);
     const result = await this.authService.login(loginDto);
     const maxAge = jwtExpirationToMs(process.env.JWT_EXPIRATION);
-    const isProd = process.env.NODE_ENV === 'production';
-    res.cookie(AUTH_ACCESS_COOKIE, result.access_token, {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: 'lax',
-      path: '/api',
-      maxAge,
-    });
+    res.cookie(AUTH_ACCESS_COOKIE, result.access_token, authCookieOptions(maxAge));
     return {
       usuario: result.usuario,
     };
@@ -58,7 +63,7 @@ export class AuthController {
   @Public()
   @Post('logout')
   async logout(@Res({ passthrough: true }) res: Response) {
-    res.clearCookie(AUTH_ACCESS_COOKIE, { path: '/api' });
+    res.clearCookie(AUTH_ACCESS_COOKIE, authCookieOptions());
     return {
       message:
         'Sesión cerrada. La cookie de acceso se eliminó en este navegador.',
