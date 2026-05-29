@@ -304,6 +304,7 @@ export class PedidosService {
       const estadosEliminables = [
         EstadoPedido.PENDIENTE,
         EstadoPedido.CARGADO_EN_RUTA,
+        EstadoPedido.CANCELADO,
       ];
       if (!estadosEliminables.includes(pedido.estado)) {
         throw new BadRequestException(

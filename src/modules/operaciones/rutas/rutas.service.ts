@@ -271,7 +271,11 @@ export class RutasService {
         );
       }
 
-      if (ruta.estado !== EstadoRuta.CREADA && ruta.estado !== EstadoRuta.CARGADA) {
+      if (
+        ruta.estado !== EstadoRuta.CREADA &&
+        ruta.estado !== EstadoRuta.CARGADA &&
+        ruta.estado !== EstadoRuta.ANULADA
+      ) {
         throw new BadRequestException(
           `No se puede eliminar una ruta en estado ${ruta.estado}. Use anular para conservar el historial.`,
         );
