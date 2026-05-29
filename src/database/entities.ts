@@ -10,6 +10,7 @@ import {
   JoinColumn,
   CreateDateColumn,
   UpdateDateColumn,
+  DeleteDateColumn,
   Index,
   Unique,
 } from 'typeorm';
@@ -57,6 +58,31 @@ export class ConfiguracionEmpresa {
 
   @Column({ nullable: true })
   slogan: string;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
+}
+
+@Entity('secuencias_consecutivos')
+@Unique(['clave'])
+export class SecuenciaConsecutivo {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Column()
+  clave: string;
+
+  @Column()
+  prefijo: string;
+
+  @Column({ length: 8 })
+  fecha: string;
+
+  @Column({ type: 'int', unsigned: true, default: 1 })
+  siguiente: number;
+
+  @CreateDateColumn()
+  createdAt: Date;
 
   @UpdateDateColumn()
   updatedAt: Date;
@@ -114,7 +140,7 @@ export class Usuario {
 // ============================================================================
 
 @Entity('productos')
-@Index(['activo'])
+@Index(['deletedAt'])
 @Index(['categoria'])
 export class Producto {
   @PrimaryGeneratedColumn()
@@ -135,8 +161,8 @@ export class Producto {
   @Column()
   unidad: string;
 
-  @Column({ default: true })
-  activo: boolean;
+  @DeleteDateColumn({ nullable: true })
+  deletedAt: Date;
 
   @OneToMany(() => PrecioCliente, (precio) => precio.producto)
   preciosCliente: PrecioCliente[];
@@ -159,6 +185,9 @@ export class Producto {
   @OneToMany(() => CierreInventario, (cierre) => cierre.producto)
   cierreInventario: CierreInventario[];
 
+  @OneToMany(() => Inventario, (inventario) => inventario.producto)
+  inventario: Inventario[];
+
   @CreateDateColumn()
   createdAt: Date;
 
@@ -171,7 +200,7 @@ export class Producto {
 // ============================================================================
 
 @Entity('clientes')
-@Index(['activo'])
+@Index(['deletedAt'])
 @Index(['tipo'])
 @Index(['nombre'])
 export class Cliente {
@@ -208,8 +237,8 @@ export class Cliente {
   @Column({ nullable: true })
   observaciones: string;
 
-  @Column({ default: true })
-  activo: boolean;
+  @DeleteDateColumn({ nullable: true })
+  deletedAt: Date;
 
   @OneToMany(() => PrecioCliente, (precio) => precio.cliente)
   preciosPersonalizados: PrecioCliente[];
@@ -239,7 +268,7 @@ export class Cliente {
 @Entity('precios_cliente')
 @Index(['clienteId'])
 @Index(['productoId'])
-@Index(['activo'])
+@Index(['deletedAt'])
 @Unique(['clienteId', 'productoId'])
 export class PrecioCliente {
   @PrimaryGeneratedColumn()
@@ -260,8 +289,8 @@ export class PrecioCliente {
   @Column({ nullable: true })
   vigenciaHasta: Date;
 
-  @Column({ default: true })
-  activo: boolean;
+  @DeleteDateColumn({ nullable: true })
+  deletedAt: Date;
 
   @ManyToOne(() => Cliente, (cliente) => cliente.preciosPersonalizados, {
     onDelete: 'CASCADE',
@@ -281,11 +310,37 @@ export class PrecioCliente {
 }
 
 // ============================================================================
+// CATALOGOS: TIPOS DE TRABAJADOR
+// ============================================================================
+
+@Entity('trabajador_tipos')
+@Unique(['nombre'])
+export class TrabajadorTipo {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Column({ length: 80 })
+  nombre: string;
+
+  @Column({ nullable: true, length: 250 })
+  descripcion: string;
+
+  @Column({ default: true })
+  activo: boolean;
+
+  @CreateDateColumn()
+  createdAt: Date;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
+}
+
+// ============================================================================
 // CATALOGOS: TRABAJADORES Y LABORES
 // ============================================================================
 
 @Entity('trabajadores')
-@Index(['activo'])
+@Index(['deletedAt'])
 @Index(['tipoTrabajador'])
 export class Trabajador {
   @PrimaryGeneratedColumn()
@@ -306,18 +361,17 @@ export class Trabajador {
   @Column({ nullable: true })
   direccion: string;
 
-  @Column({
-    type: 'enum',
-    enum: TipoTrabajador,
-    default: TipoTrabajador.PERMANENTE,
-  })
-  tipoTrabajador: TipoTrabajador;
+  @Column({ length: 80, default: TipoTrabajador.PERMANENTE })
+  tipoTrabajador: string;
+
+  @Column({ nullable: true })
+  cargo: string;
 
   @Column('decimal', { precision: 12, scale: 2, default: 0 })
   saldoTotal: number;
 
-  @Column({ default: true })
-  activo: boolean;
+  @DeleteDateColumn({ nullable: true })
+  deletedAt: Date;
 
   @OneToMany(() => TrabajadorLabor, (labor) => labor.trabajador)
   laboresAsignadas: TrabajadorLabor[];
@@ -747,7 +801,7 @@ export class LiquidacionRuta {
 @Index(['clienteId'])
 @Index(['estado'])
 @Index(['fecha'])
-@Index(['pedidoId'])
+@Unique('IDX_ventas_pedidoId_unique', ['pedidoId'])
 export class Venta {
   @PrimaryGeneratedColumn()
   id: number;
@@ -1627,6 +1681,93 @@ export class LogActividad {
   fecha: Date;
 
   @ManyToOne(() => Usuario, (usuario) => usuario.logsActividad, {
+    onDelete: 'SET NULL',
+    nullable: true,
+  })
+  usuario: Usuario;
+
+  @CreateDateColumn()
+  createdAt: Date;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
+}
+
+// ============================================================================
+// INVENTARIO: STOCK ACTUAL
+// ============================================================================
+
+@Entity('inventarios')
+@Unique(['productoId'])
+export class Inventario {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Column()
+  productoId: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  stockActual: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 10 })
+  stockMinimo: number;
+
+  @ManyToOne(() => Producto, (producto) => producto.inventario, {
+    onDelete: 'CASCADE',
+  })
+  producto: Producto;
+
+  @CreateDateColumn()
+  createdAt: Date;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
+}
+
+// ============================================================================
+// AUDITORIA: LOG CENTRALIZADO
+// ============================================================================
+
+@Entity('audit_logs')
+@Index(['entidad', 'entidadId'])
+@Index(['usuarioId'])
+@Index(['accion'])
+@Index(['fecha'])
+export class AuditLog {
+  @PrimaryGeneratedColumn()
+  id: number;
+
+  @Column()
+  entidad: string; // 'PEDIDO', 'RUTA', 'CLIENTE', 'INVENTARIO', etc.
+
+  @Column()
+  entidadId: number;
+
+  @Column()
+  accion: string; // 'CREATE', 'UPDATE', 'DELETE'
+
+  @Column({ nullable: true })
+  usuarioId: number | null;
+
+  @Column({ type: 'json', nullable: true })
+  cambiosAntes: any; // Valores previos
+
+  @Column({ type: 'json', nullable: true })
+  cambiosDespues: any; // Valores nuevos
+
+  @Column({ nullable: true })
+  ipAddress: string | null;
+
+  @Column({ nullable: true })
+  userAgent: string | null;
+
+  @Column({ nullable: true })
+  razon: string | null; // Motivo del cambio
+
+  @Column({ type: 'datetime' })
+  fecha: Date;
+
+  @ManyToOne(() => Usuario, {
     onDelete: 'SET NULL',
     nullable: true,
   })

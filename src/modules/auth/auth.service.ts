@@ -20,54 +20,46 @@ export class AuthService {
   ) {}
 
   async login(loginDto: LoginDto) {
-    try {
-      const { email, password } = loginDto;
+    const { email, password } = loginDto;
 
-      // Buscar usuario por email
-      const usuario = await this.usuarioRepository.findOne({
-        where: { email },
-      });
+    // Buscar usuario por email
+    const usuario = await this.usuarioRepository.findOne({
+      where: { email },
+    });
 
-      if (!usuario) {
-        throw new UnauthorizedException('Email o contraseña incorrectos');
-      }
+    if (!usuario) {
+      throw new UnauthorizedException('Email o contraseña incorrectos');
+    }
 
-      // Validar contraseña
-      const isPasswordValid = await bcrypt.compare(password, usuario.password);
-      if (!isPasswordValid) {
-        throw new UnauthorizedException('Email o contraseña incorrectos');
-      }
+    // Validar contraseña
+    const isPasswordValid = await bcrypt.compare(password, usuario.password);
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Email o contraseña incorrectos');
+    }
 
-      // Validar que usuario esté activo
-      if (usuario.estado !== 'ACTIVO') {
-        throw new BadRequestException('Usuario inactivo o suspendido');
-      }
+    // Validar que usuario esté activo
+    if (usuario.estado !== 'ACTIVO') {
+      throw new BadRequestException('Usuario inactivo o suspendido');
+    }
 
-      // Generar JWT
-      const payload = {
+    // Generar JWT
+    const payload = {
+      id: usuario.id,
+      email: usuario.email,
+      rol: usuario.rol,
+    };
+
+    const access_token = this.jwtService.sign(payload);
+
+    return {
+      access_token,
+      usuario: {
         id: usuario.id,
+        nombre: usuario.nombre,
         email: usuario.email,
         rol: usuario.rol,
-      };
-
-      const access_token = this.jwtService.sign(payload);
-
-      return {
-        access_token,
-        usuario: {
-          id: usuario.id,
-          nombre: usuario.nombre,
-          email: usuario.email,
-          rol: usuario.rol,
-        },
-      };
-    } catch (error) {
-      console.error('Error en login:', error);
-      if (error instanceof UnauthorizedException || error instanceof BadRequestException) {
-        throw error;
-      }
-      throw new BadRequestException('Error interno del servidor');
-    }
+      },
+    };
   }
 
   async validateToken(token: string) {

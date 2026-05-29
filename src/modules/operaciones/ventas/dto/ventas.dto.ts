@@ -5,6 +5,8 @@ import {
   IsOptional,
   IsEnum,
   IsArray,
+  Min,
+  Max,
   ValidateNested,
   IsDateString,
 } from 'class-validator';
@@ -16,12 +18,14 @@ export class DetalleVentaDto {
   @IsPositive()
   productoId: number;
 
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 0 })
   @IsPositive()
+  @Max(999)
   cantidad: number;
 
-  @IsNumber()
-  @IsPositive()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(99999999)
   precioUnitario: number;
 }
 
@@ -48,7 +52,9 @@ export class CreateVentaDto {
   tipoPago?: TipoPago;
 
   @IsOptional()
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(99999999)
   montoPagado?: number;
 
   @IsOptional()
@@ -64,8 +70,9 @@ export class RegistrarPagoVentaDto {
   @IsEnum(TipoPago)
   tipo: TipoPago;
 
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
   @IsPositive()
+  @Max(99999999)
   monto: number;
 
   @IsOptional()

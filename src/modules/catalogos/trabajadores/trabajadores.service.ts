@@ -18,6 +18,7 @@ import { CreateTrabajadorDto } from './dto/create-trabajador.dto';
 import { UpdateTrabajadorDto } from './dto/update-trabajador.dto';
 import { AppLoggerService } from '../../../common/services/logger.service';
 import { AuditService } from '../../../common/services/audit.service';
+import { MoneyUtil } from '../../../common/utils';
 
 @Injectable()
 export class TrabajadoresService {
@@ -36,6 +37,13 @@ export class TrabajadoresService {
     private logger: AppLoggerService,
     private auditService: AuditService,
   ) {}
+
+  private withActivo(trabajador: Trabajador) {
+    return {
+      ...trabajador,
+      activo: !trabajador.deletedAt,
+    };
+  }
 
   private async reconcileSaldos(trabajadores: Trabajador[]) {
     if (!trabajadores.length) return;
@@ -60,23 +68,31 @@ export class TrabajadoresService {
     ]);
 
     const laboresMap = new Map<number, number>(
-      laboresRaw.map((r) => [Number(r.trabajadorId), Number(r.total ?? 0)]),
+      laboresRaw.map((r) => [
+        Number(r.trabajadorId),
+        MoneyUtil.normalize(r.total ?? 0),
+      ]),
     );
     const pagosMap = new Map<number, number>(
-      pagosRaw.map((r) => [Number(r.trabajadorId), Number(r.total ?? 0)]),
+      pagosRaw.map((r) => [
+        Number(r.trabajadorId),
+        MoneyUtil.normalize(r.total ?? 0),
+      ]),
     );
 
     const updates: Promise<any>[] = [];
 
     for (const trabajador of trabajadores) {
-      const saldoActual = Number(trabajador.saldoTotal ?? 0);
+      const saldoActual = MoneyUtil.normalize(trabajador.saldoTotal ?? 0);
       const totalLabores = laboresMap.get(trabajador.id) ?? 0;
       const totalPagos = pagosMap.get(trabajador.id) ?? 0;
-      const saldoRecalculado = Math.max(0, totalLabores - totalPagos);
+      const saldoRecalculado = MoneyUtil.maxZero(
+        MoneyUtil.subtract(totalLabores, totalPagos),
+      );
 
       trabajador.saldoTotal = saldoRecalculado;
 
-      if (saldoActual !== saldoRecalculado) {
+      if (MoneyUtil.compare(saldoActual, saldoRecalculado) !== 0) {
         updates.push(this.trabajadorRepo.update(trabajador.id, { saldoTotal: saldoRecalculado }));
       }
     }
@@ -95,7 +111,7 @@ export class TrabajadoresService {
       .where('lt.trabajadorId IN (:...ids)', { ids: trabajadorIds })
       .andWhere('lt.activo = :activo', { activo: true })
       .andWhere('ltt.tipo IN (:...tipos)', {
-        tipos: [TipoLabor.POR_JORNADA, TipoLabor.POR_HORA],
+        tipos: [TipoLabor.POR_JORNADA, TipoLabor.POR_HORA, TipoLabor.POR_PACA],
       })
       .orderBy('lt.updatedAt', 'DESC')
       .getMany();
@@ -104,11 +120,54 @@ export class TrabajadoresService {
     for (const t of tarifas) {
       if (map.has(t.trabajadorId)) continue;
       map.set(t.trabajadorId, {
-        tarifaBase: Number(t.tarifa ?? 0),
+        tarifaBase: MoneyUtil.normalize(t.tarifa ?? 0),
         modalidadPago: t.laborTipo?.tipo as TipoLabor | undefined,
       });
     }
     return map;
+  }
+
+  private async ensureLaborTipo(tipo: TipoLabor) {
+    let laborTipo = await this.laborTipoRepo.findOne({ where: { tipo } });
+
+    if (laborTipo) {
+      if (!laborTipo.activo) {
+        laborTipo.activo = true;
+        laborTipo = await this.laborTipoRepo.save(laborTipo);
+      }
+      return laborTipo;
+    }
+
+    const defaults: Record<TipoLabor, { nombre: string; descripcion: string }> = {
+      [TipoLabor.POR_JORNADA]: {
+        nombre: 'Domiciliario Jornada',
+        descripcion: 'Pago por jornada completa',
+      },
+      [TipoLabor.POR_HORA]: {
+        nombre: 'Produccion Horas',
+        descripcion: 'Pago proporcional por horas',
+      },
+      [TipoLabor.POR_PACA]: {
+        nombre: 'Pago Por Paca',
+        descripcion: 'Pago por paca producida, sellada, vendida o entregada',
+      },
+      [TipoLabor.MANUAL]: {
+        nombre: 'Apoyo Manual',
+        descripcion: 'Pago manual por acuerdo',
+      },
+      [TipoLabor.MIXTO]: {
+        nombre: 'Labor Mixta',
+        descripcion: 'Pago combinado segun acuerdo',
+      },
+    };
+
+    return this.laborTipoRepo.save(
+      this.laborTipoRepo.create({
+        ...defaults[tipo],
+        tipo,
+        activo: true,
+      }),
+    );
   }
 
   private async upsertTarifaBase(
@@ -132,9 +191,7 @@ export class TrabajadoresService {
 
     if (!tipoLabor) return;
 
-    const laborTipo = await this.laborTipoRepo.findOne({
-      where: { tipo: tipoLabor, activo: true },
-    });
+    const laborTipo = await this.ensureLaborTipo(tipoLabor);
     if (!laborTipo) {
       // Si es creación (nuevo trabajador), es obligatorio que exista el tipo de labor
       // Si es actualización, permitir guardar sin actualizar tarifa
@@ -151,12 +208,12 @@ export class TrabajadoresService {
 
     const valorFinal =
       valor !== undefined
-        ? Number(valor)
+        ? MoneyUtil.normalize(valor)
         : tarifa
-          ? Number(tarifa.tarifa)
+          ? MoneyUtil.normalize(tarifa.tarifa)
           : 0;
 
-    if (valorFinal <= 0) return;
+    if (MoneyUtil.compare(valorFinal, 0) <= 0) return;
 
     const horasFinal =
       dto.horasBase !== undefined
@@ -164,6 +221,12 @@ export class TrabajadoresService {
         : tipoLabor === TipoLabor.POR_JORNADA
           ? 8
           : 1;
+    const unidad =
+      tipoLabor === TipoLabor.POR_JORNADA
+        ? 'JORNADA'
+        : tipoLabor === TipoLabor.POR_PACA
+          ? 'PACA'
+          : 'HORA';
 
     if (!tarifa) {
       tarifa = this.tarifaRepo.create({
@@ -171,13 +234,13 @@ export class TrabajadoresService {
         laborTipoId: laborTipo.id,
         tarifa: valorFinal,
         horas: horasFinal,
-        unidad: tipoLabor === TipoLabor.POR_JORNADA ? 'JORNADA' : 'HORA',
+        unidad,
         activo: true,
       });
     } else {
       tarifa.tarifa = valorFinal;
       tarifa.horas = horasFinal;
-      tarifa.unidad = tipoLabor === TipoLabor.POR_JORNADA ? 'JORNADA' : 'HORA';
+      tarifa.unidad = unidad;
       tarifa.activo = true;
     }
 
@@ -193,6 +256,13 @@ export class TrabajadoresService {
   ) {
     const qb = this.trabajadorRepo.createQueryBuilder('t');
 
+    if (activo !== true) {
+      qb.withDeleted();
+    }
+    if (activo === false) {
+      qb.andWhere('t.deletedAt IS NOT NULL');
+    }
+
     if (search) {
       qb.andWhere('(t.nombre LIKE :s OR t.codigo LIKE :s OR t.cedula LIKE :s)', {
         s: `%${search}%`,
@@ -201,10 +271,6 @@ export class TrabajadoresService {
     if (tipo) {
       qb.andWhere('t.tipoTrabajador = :tipo', { tipo });
     }
-    if (activo !== undefined) {
-      qb.andWhere('t.activo = :activo', { activo });
-    }
-
     qb.orderBy('t.nombre', 'ASC')
       .skip((page - 1) * limit)
       .take(limit);
@@ -215,7 +281,7 @@ export class TrabajadoresService {
     const tarifaMap = await this.getTarifasBase(data.map((t) => t.id));
 
     const items = data.map((t) => ({
-      ...t,
+      ...this.withActivo(t),
       tarifaBase: tarifaMap.get(t.id)?.tarifaBase ?? 0,
       modalidadPago: tarifaMap.get(t.id)?.modalidadPago,
     }));
@@ -238,6 +304,18 @@ export class TrabajadoresService {
     if (!trabajador) {
       throw new NotFoundException(`Trabajador con id ${id} no encontrado`);
     }
+    return this.withActivo(trabajador);
+  }
+
+  private async findOneWithDeleted(id: number) {
+    const trabajador = await this.trabajadorRepo.findOne({
+      where: { id },
+      withDeleted: true,
+      relations: ['laboresDisponibles', 'laboresDisponibles.laborTipo'],
+    });
+    if (!trabajador) {
+      throw new NotFoundException(`Trabajador con id ${id} no encontrado`);
+    }
     return trabajador;
   }
 
@@ -246,12 +324,19 @@ export class TrabajadoresService {
       modalidadPago: _modalidadPago,
       valorPago: _valorPago,
       horasBase: _horasBase,
+      activo: _activo,
       ...payload
     } = dto;
 
     const [existeCodigo, existeCedula] = await Promise.all([
-      this.trabajadorRepo.findOne({ where: { codigo: dto.codigo } }),
-      this.trabajadorRepo.findOne({ where: { cedula: dto.cedula } }),
+      this.trabajadorRepo.findOne({
+        where: { codigo: dto.codigo },
+        withDeleted: true,
+      }),
+      this.trabajadorRepo.findOne({
+        where: { cedula: dto.cedula },
+        withDeleted: true,
+      }),
     ]);
 
     if (existeCodigo) {
@@ -274,12 +359,14 @@ export class TrabajadoresService {
       modalidadPago: _modalidadPago,
       valorPago: _valorPago,
       horasBase: _horasBase,
+      activo: _activo,
       ...payload
     } = dto;
 
     if (dto.codigo && dto.codigo !== trabajador.codigo) {
       const existe = await this.trabajadorRepo.findOne({
         where: { codigo: dto.codigo },
+        withDeleted: true,
       });
       if (existe) {
         throw new ConflictException(`Ya existe un trabajador con código ${dto.codigo}`);
@@ -289,6 +376,7 @@ export class TrabajadoresService {
     if (dto.cedula && dto.cedula !== trabajador.cedula) {
       const existe = await this.trabajadorRepo.findOne({
         where: { cedula: dto.cedula },
+        withDeleted: true,
       });
       if (existe) {
         throw new ConflictException(`Ya existe un trabajador con cédula ${dto.cedula}`);
@@ -303,8 +391,19 @@ export class TrabajadoresService {
   }
 
   async toggleActivo(id: number) {
-    const trabajador = await this.findOne(id);
-    trabajador.activo = !trabajador.activo;
-    return this.trabajadorRepo.save(trabajador);
+    const trabajador = await this.findOneWithDeleted(id);
+    const resultado = trabajador.deletedAt
+      ? await this.trabajadorRepo.recover(trabajador)
+      : await this.trabajadorRepo.softRemove(trabajador);
+
+    return this.withActivo(resultado);
+  }
+
+  async remove(id: number) {
+    const trabajador = await this.findOneWithDeleted(id);
+    if (!trabajador.deletedAt) {
+      await this.trabajadorRepo.softRemove(trabajador);
+    }
+    return { message: `Trabajador ${trabajador.codigo} eliminado correctamente` };
   }
 }

@@ -2,17 +2,17 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
-  BadRequestException,
   Inject,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like } from 'typeorm';
+import { Repository } from 'typeorm';
 import { Cliente, PrecioCliente, Producto } from '../../../database/entities';
 import { CreateClienteDto } from './dto/create-cliente.dto';
 import { UpdateClienteDto } from './dto/update-cliente.dto';
 import { UpsertPrecioClienteDto } from './dto/upsert-precio.dto';
 import { AppLoggerService } from '../../../common/services/logger.service';
 import { AuditService } from '../../../common/services/audit.service';
+import { MoneyUtil } from '../../../common/utils';
 
 @Injectable()
 export class ClientesService {
@@ -28,6 +28,13 @@ export class ClientesService {
     private auditService: AuditService,
   ) {}
 
+  private withActivo(cliente: Cliente) {
+    return {
+      ...cliente,
+      activo: !cliente.deletedAt,
+    };
+  }
+
   async findAll(
     page = 1,
     limit = 10,
@@ -37,6 +44,12 @@ export class ClientesService {
   ) {
     const qb = this.clienteRepo.createQueryBuilder('c');
 
+    if (activo !== true) {
+      qb.withDeleted();
+    }
+    if (activo === false) {
+      qb.andWhere('c.deletedAt IS NOT NULL');
+    }
     if (search) {
       qb.andWhere('(c.nombre LIKE :s OR c.codigo LIKE :s)', {
         s: `%${search}%`,
@@ -45,18 +58,17 @@ export class ClientesService {
     if (tipo) {
       qb.andWhere('c.tipo = :tipo', { tipo });
     }
-    if (activo !== undefined) {
-      qb.andWhere('c.activo = :activo', { activo });
-    }
 
     qb.orderBy('c.nombre', 'ASC')
       .skip((page - 1) * limit)
       .take(limit);
 
     const [data, total] = await qb.getManyAndCount();
+    const items = data.map((cliente) => this.withActivo(cliente));
+
     return {
-      data,
-      items: data,
+      data: items,
+      items,
       total,
       page,
       limit,
@@ -72,6 +84,18 @@ export class ClientesService {
     if (!cliente) {
       throw new NotFoundException(`Cliente con id ${id} no encontrado`);
     }
+    return this.withActivo(cliente);
+  }
+
+  private async findOneWithDeleted(id: number) {
+    const cliente = await this.clienteRepo.findOne({
+      where: { id },
+      withDeleted: true,
+      relations: ['preciosPersonalizados', 'preciosPersonalizados.producto'],
+    });
+    if (!cliente) {
+      throw new NotFoundException(`Cliente con id ${id} no encontrado`);
+    }
     return cliente;
   }
 
@@ -79,15 +103,16 @@ export class ClientesService {
     try {
       const existe = await this.clienteRepo.findOne({
         where: { codigo: dto.codigo },
+        withDeleted: true,
       });
       if (existe) {
-        throw new ConflictException(`Ya existe un cliente con código ${dto.codigo}`);
+        throw new ConflictException(`Ya existe un cliente con codigo ${dto.codigo}`);
       }
 
-      const cliente = this.clienteRepo.create(dto);
+      const { activo: _activo, ...payload } = dto;
+      const cliente = this.clienteRepo.create(payload);
       const resultado = await this.clienteRepo.save(cliente);
 
-      // Auditoría no bloquea la respuesta
       try {
         this.logger.logOperation('CREATE', 'Cliente', resultado.id, {
           statusCode: 201,
@@ -97,13 +122,13 @@ export class ClientesService {
         await this.auditService.registrarActividad({
           usuarioId: dto.usuarioId || 0,
           accion: 'CREAR_CLIENTE',
-          descripcion: `Creó cliente ${resultado.codigo}: ${resultado.nombre}`,
+          descripcion: `Creo cliente ${resultado.codigo}: ${resultado.nombre}`,
         });
       } catch (auditError) {
-        this.logger.logCriticalError('Error en auditoría de creación de cliente', auditError);
+        this.logger.logCriticalError('Error en auditoria de creacion de cliente', auditError);
       }
 
-      return resultado;
+      return this.withActivo(resultado);
     } catch (error) {
       this.logger.logCriticalError('Error creating cliente', error);
       throw error;
@@ -117,14 +142,15 @@ export class ClientesService {
       if (dto.codigo && dto.codigo !== clienteAnterior.codigo) {
         const existe = await this.clienteRepo.findOne({
           where: { codigo: dto.codigo },
+          withDeleted: true,
         });
         if (existe) {
-          throw new ConflictException(`Ya existe un cliente con código ${dto.codigo}`);
+          throw new ConflictException(`Ya existe un cliente con codigo ${dto.codigo}`);
         }
       }
 
-      // Detectar cambios
-      const cambios = this.auditService.detectarCambios(clienteAnterior, dto);
+      const { activo: _activo, ...payload } = dto;
+      const cambios = this.auditService.detectarCambios(clienteAnterior, payload);
       if (Object.keys(cambios).length > 0) {
         for (const [campo, { antes, despues }] of Object.entries(cambios)) {
           await this.auditService.registrarCambio({
@@ -134,12 +160,12 @@ export class ClientesService {
             campo,
             valorAnterior: antes,
             valorNuevo: despues,
-            razonCambio: dto.razonCambio || 'Actualización',
+            razonCambio: dto.razonCambio || 'Actualizacion',
           });
         }
       }
 
-      Object.assign(clienteAnterior, dto);
+      Object.assign(clienteAnterior, payload);
       const resultado = await this.clienteRepo.save(clienteAnterior);
 
       try {
@@ -149,10 +175,10 @@ export class ClientesService {
           path: `/catalogos/clientes/${id}`,
         });
       } catch (auditError) {
-        this.logger.logCriticalError('Error en auditoría de actualización de cliente', auditError);
+        this.logger.logCriticalError('Error en auditoria de actualizacion de cliente', auditError);
       }
 
-      return resultado;
+      return this.withActivo(resultado);
     } catch (error) {
       this.logger.logCriticalError('Error updating cliente', error);
       throw error;
@@ -161,20 +187,22 @@ export class ClientesService {
 
   async toggleActivo(id: number, usuarioId: number = 0) {
     try {
-      const cliente = await this.findOne(id);
-      const estadoAnterior = cliente.activo;
-      cliente.activo = !cliente.activo;
-      const resultado = await this.clienteRepo.save(cliente);
+      const cliente = await this.findOneWithDeleted(id);
+      const estadoAnterior = !cliente.deletedAt;
+      const resultado = cliente.deletedAt
+        ? await this.clienteRepo.recover(cliente)
+        : await this.clienteRepo.softRemove(cliente);
+      const estadoNuevo = !resultado.deletedAt;
 
       try {
         await this.auditService.registrarCambio({
           usuarioId,
           entidad: 'Cliente',
           registroId: id,
-          campo: 'activo',
+          campo: 'deletedAt',
           valorAnterior: estadoAnterior,
-          valorNuevo: resultado.activo,
-          razonCambio: `Cambio de estado a ${resultado.activo ? 'activo' : 'inactivo'}`,
+          valorNuevo: estadoNuevo,
+          razonCambio: `Cambio de estado a ${estadoNuevo ? 'activo' : 'inactivo'}`,
         });
         this.logger.logOperation('UPDATE', 'Cliente', id, {
           statusCode: 200,
@@ -182,10 +210,10 @@ export class ClientesService {
           path: `/catalogos/clientes/${id}/toggle`,
         });
       } catch (auditError) {
-        this.logger.logCriticalError('Error en auditoría de toggle cliente', auditError);
+        this.logger.logCriticalError('Error en auditoria de toggle cliente', auditError);
       }
 
-      return resultado;
+      return this.withActivo(resultado);
     } catch (error) {
       this.logger.logCriticalError('Error toggling cliente activo', error);
       throw error;
@@ -205,17 +233,31 @@ export class ClientesService {
       throw new NotFoundException(`Producto con id ${dto.productoId} no encontrado`);
     }
 
+    const { activo, ...payload } = dto;
+    const precioPayload = {
+      ...payload,
+      precioUnitario: MoneyUtil.normalize(payload.precioUnitario),
+    };
     let precio = await this.precioRepo.findOne({
       where: { clienteId, productoId: dto.productoId },
+      withDeleted: true,
     });
 
     if (precio) {
-      Object.assign(precio, dto);
+      Object.assign(precio, precioPayload);
     } else {
-      precio = this.precioRepo.create({ clienteId, ...dto });
+      precio = this.precioRepo.create({ clienteId, ...precioPayload });
     }
 
-    return this.precioRepo.save(precio);
+    const saved = await this.precioRepo.save(precio);
+    if (activo === false && !saved.deletedAt) {
+      return this.precioRepo.softRemove(saved);
+    }
+    if (activo === true && saved.deletedAt) {
+      return this.precioRepo.recover(saved);
+    }
+
+    return saved;
   }
 
   async getPreciosCliente(clienteId: number) {
@@ -225,7 +267,7 @@ export class ClientesService {
     }
 
     return this.precioRepo.find({
-      where: { clienteId, activo: true },
+      where: { clienteId },
       relations: ['producto'],
       order: { producto: { nombre: 'ASC' } },
     });
@@ -235,13 +277,8 @@ export class ClientesService {
     const cliente = await this.findOne(id);
 
     try {
-      await this.clienteRepo.delete(id);
+      await this.clienteRepo.softRemove(cliente);
     } catch (error) {
-      if ((error as any)?.code === 'ER_ROW_IS_REFERENCED_2' || (error as any)?.errno === 1451) {
-        throw new BadRequestException(
-          'No se puede eliminar el cliente porque tiene pedidos, ventas o movimientos registrados. Puede desactivarlo en su lugar.',
-        );
-      }
       this.logger.logCriticalError('Error deleting cliente', error);
       throw error;
     }
@@ -255,10 +292,10 @@ export class ClientesService {
       await this.auditService.registrarActividad({
         usuarioId,
         accion: 'ELIMINAR_CLIENTE',
-        descripcion: `Eliminó cliente ${cliente.codigo}: ${cliente.nombre}`,
+        descripcion: `Elimino cliente ${cliente.codigo}: ${cliente.nombre}`,
       });
     } catch (auditError) {
-      this.logger.logCriticalError('Error en auditoría de eliminación de cliente', auditError);
+      this.logger.logCriticalError('Error en auditoria de eliminacion de cliente', auditError);
     }
 
     return { message: `Cliente ${cliente.codigo} eliminado correctamente` };

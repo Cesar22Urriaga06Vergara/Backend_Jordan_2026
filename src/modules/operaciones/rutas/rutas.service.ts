@@ -17,6 +17,7 @@ import {
   Pago,
   Cartera,
   MovimientoCaja,
+  MovimientoInventario,
 } from '../../../database/entities';
 import {
   EstadoRuta,
@@ -24,6 +25,7 @@ import {
   EstadoVenta,
   TipoPago,
   TipoMovimientoCaja,
+  TipoMovimientoInventario,
 } from '../../../common/enums';
 import {
   CreateRutaDto,
@@ -32,6 +34,8 @@ import {
   CambioEstadoRutaDto,
   PedidoEntregaDto,
 } from './dto/rutas.dto';
+import { ConsecutivoService } from '../../../common/services/consecutivo.service';
+import { MoneyUtil } from '../../../common/utils';
 
 const TRANSICIONES_RUTA: Partial<Record<EstadoRuta, EstadoRuta[]>> = {
   [EstadoRuta.CREADA]: [EstadoRuta.CARGADA, EstadoRuta.ANULADA],
@@ -44,6 +48,8 @@ const TRANSICIONES_RUTA: Partial<Record<EstadoRuta, EstadoRuta[]>> = {
 
 @Injectable()
 export class RutasService {
+  private readonly saldoMinimoCartera = 50;
+
   constructor(
     @InjectRepository(Ruta)
     private rutaRepo: Repository<Ruta>,
@@ -55,6 +61,7 @@ export class RutasService {
     private pedidoRepo: Repository<Pedido>,
     @InjectRepository(Trabajador)
     private trabajadorRepo: Repository<Trabajador>,
+    private consecutivoService: ConsecutivoService,
   ) {}
 
   private async generarConsecutivo(
@@ -64,22 +71,53 @@ export class RutasService {
     prefijo: string,
     fecha = new Date(),
   ): Promise<string> {
-    const base = `${prefijo}-${fecha.getFullYear()}${String(fecha.getMonth() + 1).padStart(2, '0')}${String(fecha.getDate()).padStart(2, '0')}`;
-    const count = await manager
-      .createQueryBuilder(entidad, alias)
-      .where(`${alias}.numero LIKE :pref`, { pref: `${base}%` })
-      .getCount();
-    return `${base}-${String(count + 1).padStart(3, '0')}`;
+    return this.consecutivoService.generar(prefijo, fecha, manager);
   }
 
   private async generarNumeroRuta(): Promise<string> {
-    const hoy = new Date();
-    const prefix = `RUT-${hoy.getFullYear()}${String(hoy.getMonth() + 1).padStart(2, '0')}${String(hoy.getDate()).padStart(2, '0')}`;
-    const count = await this.rutaRepo
-      .createQueryBuilder('r')
-      .where('r.numero LIKE :prefix', { prefix: `${prefix}%` })
-      .getCount();
-    return `${prefix}-${String(count + 1).padStart(3, '0')}`;
+    return this.consecutivoService.generar('RUT');
+  }
+
+  private toMoneyNumber(value: unknown): number {
+    return MoneyUtil.normalize(value as number | string | null | undefined);
+  }
+
+  private liquidacionMatchesSnapshot(
+    liquidacion: LiquidacionRuta,
+    dto: LiquidarRutaDto,
+  ): boolean {
+    return (
+      this.toMoneyNumber(liquidacion.totalEntregado) ===
+        this.toMoneyNumber(dto.totalEntregado) &&
+      this.toMoneyNumber(liquidacion.totalRecaudado) ===
+        this.toMoneyNumber(dto.totalRecaudado) &&
+      this.toMoneyNumber(liquidacion.totalCartera) ===
+        this.toMoneyNumber(dto.totalCartera) &&
+      this.toMoneyNumber(liquidacion.diferencia) ===
+        this.toMoneyNumber(dto.diferencia) &&
+      this.toMoneyNumber(liquidacion.efectivoRecibido) ===
+        this.toMoneyNumber(dto.efectivoRecibido) &&
+      this.toMoneyNumber(liquidacion.transferenciaRecibida) ===
+        this.toMoneyNumber(dto.transferenciaRecibida)
+    );
+  }
+
+  private applyLiquidacionSnapshot(
+    liquidacion: LiquidacionRuta,
+    dto: LiquidarRutaDto,
+    fecha: Date,
+  ): LiquidacionRuta {
+    liquidacion.fecha = fecha;
+    liquidacion.totalEntregado = this.toMoneyNumber(dto.totalEntregado);
+    liquidacion.totalRecaudado = this.toMoneyNumber(dto.totalRecaudado);
+    liquidacion.totalCartera = this.toMoneyNumber(dto.totalCartera);
+    liquidacion.diferencia = this.toMoneyNumber(dto.diferencia);
+    liquidacion.efectivoRecibido = this.toMoneyNumber(dto.efectivoRecibido);
+    liquidacion.transferenciaRecibida = this.toMoneyNumber(
+      dto.transferenciaRecibida,
+    );
+    liquidacion.observaciones = (dto.observaciones?.trim() || null) as any;
+    return liquidacion;
   }
 
   async findAll(
@@ -135,7 +173,7 @@ export class RutasService {
   async create(dto: CreateRutaDto) {
     if (dto.domiciliarioId) {
       const domiciliario = await this.trabajadorRepo.findOne({
-        where: { id: dto.domiciliarioId, activo: true },
+        where: { id: dto.domiciliarioId },
       });
       if (!domiciliario) {
         throw new NotFoundException(`Domiciliario ${dto.domiciliarioId} no encontrado`);
@@ -291,6 +329,22 @@ export class RutasService {
       );
     }
 
+    if (ruta.estado === EstadoRuta.LIQUIDADA) {
+      const liquidacionExistente = await this.liquidacionRepo.findOne({
+        where: { rutaId },
+      });
+      if (
+        liquidacionExistente &&
+        this.liquidacionMatchesSnapshot(liquidacionExistente, dto)
+      ) {
+        return ruta;
+      }
+
+      throw new BadRequestException(
+        `La ruta ya fue liquidada y no puede modificarse`,
+      );
+    }
+
     if (ruta.estado !== EstadoRuta.EN_LIQUIDACION) {
       throw new BadRequestException(
         `La ruta debe estar en estado EN_LIQUIDACION para liquidar`,
@@ -305,45 +359,22 @@ export class RutasService {
       });
 
       if (liquidacionExistente) {
-        liquidacionExistente.fecha = ahora;
-        liquidacionExistente.totalEntregado =
-          Number(liquidacionExistente.totalEntregado) +
-          Number(dto.totalEntregado ?? 0);
-        liquidacionExistente.totalRecaudado =
-          Number(liquidacionExistente.totalRecaudado) +
-          Number(dto.totalRecaudado ?? 0);
-        liquidacionExistente.totalCartera =
-          Number(liquidacionExistente.totalCartera) +
-          Number(dto.totalCartera ?? 0);
-        liquidacionExistente.diferencia =
-          Number(liquidacionExistente.diferencia) + Number(dto.diferencia ?? 0);
-        liquidacionExistente.efectivoRecibido =
-          Number(liquidacionExistente.efectivoRecibido) +
-          Number(dto.efectivoRecibido ?? 0);
-        liquidacionExistente.transferenciaRecibida =
-          Number(liquidacionExistente.transferenciaRecibida) +
-          Number(dto.transferenciaRecibida ?? 0);
-
-        if (dto.observaciones?.trim()) {
-          liquidacionExistente.observaciones =
-            liquidacionExistente.observaciones?.trim()
-              ? `${liquidacionExistente.observaciones} | ${dto.observaciones.trim()}`
-              : dto.observaciones.trim();
-        }
-
-        await manager.save(LiquidacionRuta, liquidacionExistente);
+        await manager.save(
+          LiquidacionRuta,
+          this.applyLiquidacionSnapshot(liquidacionExistente, dto, ahora),
+        );
         liquidacionId = liquidacionExistente.id;
       } else {
         const liquidacionNueva = manager.create(LiquidacionRuta, {
           rutaId,
           fecha: ahora,
-          totalEntregado: dto.totalEntregado,
-          totalRecaudado: dto.totalRecaudado,
-          totalCartera: dto.totalCartera,
-          diferencia: dto.diferencia,
-          efectivoRecibido: dto.efectivoRecibido ?? 0,
-          transferenciaRecibida: dto.transferenciaRecibida ?? 0,
-          observaciones: dto.observaciones,
+          totalEntregado: this.toMoneyNumber(dto.totalEntregado),
+          totalRecaudado: this.toMoneyNumber(dto.totalRecaudado),
+          totalCartera: this.toMoneyNumber(dto.totalCartera),
+          diferencia: this.toMoneyNumber(dto.diferencia),
+          efectivoRecibido: this.toMoneyNumber(dto.efectivoRecibido),
+          transferenciaRecibida: this.toMoneyNumber(dto.transferenciaRecibida),
+          observaciones: dto.observaciones?.trim() || undefined,
         });
 
         const savedLiquidacion = await manager.save(LiquidacionRuta, liquidacionNueva);
@@ -356,8 +387,8 @@ export class RutasService {
           .map((p) => ({
             ...p,
             pedidoId: Number(p?.pedidoId),
-            montoEfectivo: Number(p?.montoEfectivo ?? 0),
-            montoTransferencia: Number(p?.montoTransferencia ?? 0),
+            montoEfectivo: MoneyUtil.maxZero(p?.montoEfectivo),
+            montoTransferencia: MoneyUtil.maxZero(p?.montoTransferencia),
           }))
           .filter((p) => Number.isFinite(p.pedidoId) && p.pedidoId > 0);
 
@@ -424,19 +455,39 @@ export class RutasService {
           // - NO_ENTREGADO -> no crea venta
           if (!p.entregado) continue;
 
+          const movimientosExistentes = await manager.count(MovimientoInventario, {
+            where: {
+              rutaId,
+              tipo: TipoMovimientoInventario.DESPACHO_ENTREGA,
+              observaciones: `Pedido ${pedido.numero} ENTREGADO`,
+            },
+          });
+          if (movimientosExistentes === 0) {
+            const movimientosInventario = (pedido.detalles ?? []).map((detalle) =>
+              manager.create(MovimientoInventario, {
+                productoId: detalle.productoId,
+                tipo: TipoMovimientoInventario.DESPACHO_ENTREGA,
+                cantidad: detalle.cantidad,
+                fecha: ahora,
+                rutaId,
+                observaciones: `Pedido ${pedido.numero} ENTREGADO`,
+              }),
+            );
+            if (movimientosInventario.length > 0) {
+              await manager.save(MovimientoInventario, movimientosInventario);
+            }
+          }
+
           const ventaExistente = await manager.findOne(Venta, {
             where: { pedidoId: pedido.id },
           });
           if (ventaExistente) continue;
 
-          const totalVenta = Number(
-            (pedido.detalles ?? []).reduce(
-              (acc, d) => acc + Number(d?.subtotal ?? 0),
-              0,
-            ),
+          const totalVenta = MoneyUtil.add(
+            ...(pedido.detalles ?? []).map((d) => d?.subtotal ?? 0),
           );
 
-          if (totalVenta <= 0) continue;
+          if (MoneyUtil.compare(totalVenta, 0) <= 0) continue;
 
           let montoPagado = 0;
           let saldoPendiente = totalVenta;
@@ -447,22 +498,33 @@ export class RutasService {
 
           if (!p.aCredito) {
             const tipoPagoPedido = p.tipoPago ?? TipoPago.EFECTIVO;
-            const montoEfectivoInput = Math.max(0, Number(p.montoEfectivo ?? 0));
-            const montoTransferenciaInput = Math.max(0, Number(p.montoTransferencia ?? 0));
+            const montoEfectivoInput = MoneyUtil.maxZero(p.montoEfectivo);
+            const montoTransferenciaInput = MoneyUtil.maxZero(
+              p.montoTransferencia,
+            );
 
             if (tipoPagoPedido === 'EFECTIVO') {
-              pagoEfectivo = montoEfectivoInput > 0 ? montoEfectivoInput : totalVenta;
+              pagoEfectivo =
+                MoneyUtil.compare(montoEfectivoInput, 0) > 0
+                  ? montoEfectivoInput
+                  : totalVenta;
               pagoTransferencia = 0;
             } else if (tipoPagoPedido === 'TRANSFERENCIA') {
-              pagoTransferencia = montoTransferenciaInput > 0 ? montoTransferenciaInput : totalVenta;
+              pagoTransferencia =
+                MoneyUtil.compare(montoTransferenciaInput, 0) > 0
+                  ? montoTransferenciaInput
+                  : totalVenta;
               pagoEfectivo = 0;
             } else {
               pagoEfectivo = montoEfectivoInput;
               pagoTransferencia = montoTransferenciaInput;
             }
 
-            const pagoSolicitado = pagoEfectivo + pagoTransferencia;
-            if (pagoSolicitado > totalVenta) {
+            const pagoSolicitado = MoneyUtil.add(
+              pagoEfectivo,
+              pagoTransferencia,
+            );
+            if (MoneyUtil.compare(pagoSolicitado, totalVenta) > 0) {
               throw new BadRequestException(
                 `El pago del pedido ${pedido.id} excede el total del pedido`,
               );
@@ -471,7 +533,17 @@ export class RutasService {
             montoPagado = pagoSolicitado;
           }
 
-          saldoPendiente = Math.max(0, totalVenta - montoPagado);
+          saldoPendiente = MoneyUtil.maxZero(
+            MoneyUtil.subtract(totalVenta, montoPagado),
+          );
+          if (
+            MoneyUtil.compare(saldoPendiente, 0) > 0 &&
+            MoneyUtil.compare(saldoPendiente, this.saldoMinimoCartera) < 0
+          ) {
+            throw new BadRequestException(
+              `El pedido ${pedido.numero ?? pedido.id} queda con saldo de $${saldoPendiente}. Ajusta el pago para cancelarlo completo o deja al menos $${this.saldoMinimoCartera} en cartera.`,
+            );
+          }
           estadoVenta =
             saldoPendiente <= 0
               ? EstadoVenta.COMPLETADA
@@ -507,13 +579,13 @@ export class RutasService {
                 ventaId: savedVenta.id,
                 productoId: det.productoId,
                 cantidad: Number(det.cantidad ?? 0),
-                precioUnitario: Number(det.precioUnitario ?? 0),
-                subtotal: Number(det.subtotal ?? 0),
+                precioUnitario: MoneyUtil.normalize(det.precioUnitario),
+                subtotal: MoneyUtil.normalize(det.subtotal),
               }),
             );
           }
 
-          if (pagoEfectivo > 0) {
+          if (MoneyUtil.compare(pagoEfectivo, 0) > 0) {
             const numeroPagoEfectivo = await this.generarConsecutivo(
               manager,
               Pago,
@@ -558,7 +630,7 @@ export class RutasService {
             );
           }
 
-          if (pagoTransferencia > 0) {
+          if (MoneyUtil.compare(pagoTransferencia, 0) > 0) {
             const numeroPagoTransferencia = await this.generarConsecutivo(
               manager,
               Pago,
@@ -603,7 +675,7 @@ export class RutasService {
             );
           }
 
-          if (saldoPendiente > 0) {
+          if (MoneyUtil.compare(saldoPendiente, 0) > 0) {
             await manager.save(
               Cartera,
               manager.create(Cartera, {
@@ -642,7 +714,18 @@ export class RutasService {
         pendientesRuta === 0 ? EstadoRuta.LIQUIDADA : EstadoRuta.EN_LIQUIDACION;
       await manager.save(Ruta, rutaActualizada);
 
-      return this.findOne(rutaId);
+      return manager.findOne(Ruta, {
+        where: { id: rutaId },
+        relations: [
+          'domiciliario',
+          'itemsRuta',
+          'itemsRuta.pedido',
+          'itemsRuta.pedido.cliente',
+          'itemsRuta.pedido.detalles',
+          'itemsRuta.pedido.detalles.producto',
+          'liquidacion',
+        ],
+      });
     });
   }
 }

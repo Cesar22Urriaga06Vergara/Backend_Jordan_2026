@@ -46,8 +46,8 @@ async function test() {
         'Content-Type': 'application/json'
       }
     }, {
-      email: 'urriagac44@gmail.com',
-      password: 'Cesar2206'
+      email: process.env.TEST_EMAIL || 'urriagac44@gmail.com',
+      password: process.env.TEST_PASSWORD || ''
     });
 
     console.log(`Status: ${loginRes.status}`);

@@ -5,6 +5,8 @@ import {
   IsString,
   IsEnum,
   IsDateString,
+  Min,
+  Max,
 } from 'class-validator';
 import { TipoAnticipoPrestamo } from '../../../common/enums';
 
@@ -15,20 +17,34 @@ export class RegistrarLaborDto {
 
   @IsNumber()
   @IsPositive()
-  laborTarifaId: number;
+  @IsOptional()
+  laborTarifaId?: number;
+
+  @IsNumber()
+  @IsPositive()
+  @IsOptional()
+  laborTipoId?: number;
 
   @IsDateString()
   fecha: string;
 
   @IsOptional()
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
   @IsPositive()
+  @Max(999999)
   cantidadRealizado?: number;
 
   @IsOptional()
-  @IsNumber()
-  @IsPositive()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(99999999)
   montoAPagar?: number;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsPositive()
+  @Max(99999999)
+  valorUnitario?: number;
 
   @IsOptional()
   @IsString()
@@ -43,16 +59,21 @@ export class PagarTrabajadorDto {
   @IsDateString()
   fecha: string;
 
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
   @IsPositive()
+  @Max(99999999)
   montoBase: number;
 
   @IsOptional()
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(99999999)
   descuentosAplicados?: number;
 
   @IsOptional()
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(99999999)
   abonoADeuda?: number;
 
   @IsOptional()
@@ -68,8 +89,9 @@ export class RegistrarAnticipoDto {
   @IsEnum(TipoAnticipoPrestamo)
   tipo: TipoAnticipoPrestamo;
 
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
   @IsPositive()
+  @Max(99999999)
   monto: number;
 
   @IsDateString()
@@ -93,8 +115,9 @@ export class AbonarDeudaDto {
   @IsPositive()
   anticipoPrestamoId: number;
 
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
   @IsPositive()
+  @Max(99999999)
   monto: number;
 
   @IsDateString()

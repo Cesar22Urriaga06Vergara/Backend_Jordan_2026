@@ -4,12 +4,15 @@ import { Repository } from 'typeorm';
 import { MovimientoCaja } from '../../../database/entities';
 import { TipoMovimientoCaja, TipoPago } from '../../../common/enums';
 import { RegistrarEgresoDto, BuscarEgresosDto } from './dto/egresos.dto';
+import { ConsecutivoService } from '../../../common/services/consecutivo.service';
+import { MoneyUtil } from '../../../common/utils';
 
 @Injectable()
 export class EgresosService {
   constructor(
     @InjectRepository(MovimientoCaja)
     private movCajaRepo: Repository<MovimientoCaja>,
+    private consecutivoService: ConsecutivoService,
   ) {}
 
   private getFechaLocalISO(fecha?: string) {
@@ -34,13 +37,17 @@ export class EgresosService {
     return new Date(y, m - 1, d, 12, 0, 0, 0);
   }
 
+  private getDayRange(fecha?: string) {
+    const fechaStr = this.getFechaLocalISO(fecha);
+    const [y, m, d] = fechaStr.split('-').map(Number);
+    return {
+      start: new Date(y, (m ?? 1) - 1, d ?? 1, 0, 0, 0, 0),
+      end: new Date(y, (m ?? 1) - 1, d ?? 1, 23, 59, 59, 999),
+    };
+  }
+
   private async generarNumero(fecha: Date) {
-    const prefix = `EGR-${fecha.getFullYear()}${String(fecha.getMonth() + 1).padStart(2, '0')}${String(fecha.getDate()).padStart(2, '0')}`;
-    const count = await this.movCajaRepo
-      .createQueryBuilder('m')
-      .where('m.numero LIKE :prefix', { prefix: `${prefix}%` })
-      .getCount();
-    return `${prefix}-${String(count + 1).padStart(3, '0')}`;
+    return this.consecutivoService.generar('EGR', fecha);
   }
 
   async findAll(page = 1, limit = 20, filtros?: BuscarEgresosDto) {
@@ -59,6 +66,10 @@ export class EgresosService {
     if (filtros?.fecha) {
       const fechaStr = this.getFechaLocalISO(filtros.fecha);
       qb.andWhere('DATE(m.fecha) = :fecha', { fecha: fechaStr });
+    } else if (filtros?.fechaDesde || filtros?.fechaHasta) {
+      const desde = this.getDayRange(filtros.fechaDesde).start;
+      const hasta = this.getDayRange(filtros.fechaHasta ?? filtros.fechaDesde).end;
+      qb.andWhere('m.fecha >= :desde AND m.fecha <= :hasta', { desde, hasta });
     }
 
     if (filtros?.medioPago) {
@@ -94,12 +105,12 @@ export class EgresosService {
       throw new BadRequestException('El concepto es requerido');
     }
 
-    const monto = Number(dto.monto);
-    if (isNaN(monto) || monto <= 0) {
+    const monto = MoneyUtil.normalize(dto.monto);
+    if (MoneyUtil.compare(monto, 0) <= 0) {
       throw new BadRequestException('El monto debe ser un número positivo');
     }
 
-    if (monto > 99999999) {
+    if (MoneyUtil.compare(monto, 99999999) > 0) {
       throw new BadRequestException('El monto excede el límite permitido (máx: 99,999,999)');
     }
 

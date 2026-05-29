@@ -6,12 +6,14 @@ import {
   IsDateString,
   IsEnum,
   IsIn,
+  Max,
 } from 'class-validator';
 import { TipoPago } from '../../../../common/enums';
 
 export class RegistrarEgresoDto {
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
   @IsPositive()
+  @Max(99999999)
   monto: number;
 
   @IsString()
@@ -39,6 +41,14 @@ export class BuscarEgresosDto {
   @IsOptional()
   @IsDateString()
   fecha?: string;
+
+  @IsOptional()
+  @IsDateString()
+  fechaDesde?: string;
+
+  @IsOptional()
+  @IsDateString()
+  fechaHasta?: string;
 
   @IsOptional()
   @IsEnum(TipoPago)

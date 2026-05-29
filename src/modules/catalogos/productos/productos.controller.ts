@@ -13,6 +13,11 @@ import {
 import { ProductosService } from './productos.service';
 import { CreateProductoDto } from './dto/create-producto.dto';
 import { UpdateProductoDto } from './dto/update-producto.dto';
+import { CurrentUser } from '../../../common/decorators';
+
+interface AuthUser {
+  id: number;
+}
 
 @Controller('catalogos/productos')
 export class ProductosController {
@@ -48,22 +53,29 @@ export class ProductosController {
   }
 
   @Post()
-  create(@Body() dto: CreateProductoDto) {
-    return this.productosService.create(dto);
+  create(@Body() dto: CreateProductoDto, @CurrentUser() user: AuthUser) {
+    return this.productosService.create({ ...dto, usuarioId: user.id });
   }
 
   @Put(':id')
-  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateProductoDto) {
-    return this.productosService.update(id, dto);
+  update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateProductoDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.productosService.update(id, { ...dto, usuarioId: user.id });
   }
 
   @Patch(':id/toggle-activo')
-  toggleActivo(@Param('id', ParseIntPipe) id: number) {
-    return this.productosService.toggleActivo(id);
+  toggleActivo(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.productosService.toggleActivo(id, user.id);
   }
 
   @Delete(':id')
-  delete(@Param('id', ParseIntPipe) id: number) {
-    return this.productosService.delete(id);
+  delete(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
+    return this.productosService.delete(id, user.id);
   }
 }

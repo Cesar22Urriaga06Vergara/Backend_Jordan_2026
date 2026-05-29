@@ -20,10 +20,47 @@ import { CurrentUser } from '../../common/decorators';
 export class TrabajadoresOpsController {
   constructor(private service: TrabajadoresOpsService) {}
 
+  @Get('labor-tipos')
+  getTiposLabor() {
+    return this.service.getTiposLabor();
+  }
+
   @Get('anticipos')
-  getAnticiposAll(@Query('trabajadorId') trabajadorId?: string) {
+  getAnticiposAll(
+    @Query('trabajadorId') trabajadorId?: string,
+    @Query('fechaDesde') fechaDesde?: string,
+    @Query('fechaHasta') fechaHasta?: string,
+  ) {
     return this.service.getAnticipos(
       trabajadorId ? parseInt(trabajadorId) : undefined,
+      fechaDesde,
+      fechaHasta,
+    );
+  }
+
+  @Get('pagos')
+  getPagos(
+    @Query('trabajadorId') trabajadorId?: string,
+    @Query('fechaDesde') fechaDesde?: string,
+    @Query('fechaHasta') fechaHasta?: string,
+  ) {
+    return this.service.getPagos(
+      trabajadorId ? parseInt(trabajadorId) : undefined,
+      fechaDesde,
+      fechaHasta,
+    );
+  }
+
+  @Get('abonos')
+  getAbonos(
+    @Query('trabajadorId') trabajadorId?: string,
+    @Query('fechaDesde') fechaDesde?: string,
+    @Query('fechaHasta') fechaHasta?: string,
+  ) {
+    return this.service.getAbonos(
+      trabajadorId ? parseInt(trabajadorId) : undefined,
+      fechaDesde,
+      fechaHasta,
     );
   }
 
@@ -31,10 +68,14 @@ export class TrabajadoresOpsController {
   getLaboresToday(
     @Query('trabajadorId') trabajadorId?: string,
     @Query('fecha') fecha?: string,
+    @Query('fechaDesde') fechaDesde?: string,
+    @Query('fechaHasta') fechaHasta?: string,
   ) {
     return this.service.getLaboresToday(
       trabajadorId ? parseInt(trabajadorId) : undefined,
       fecha,
+      fechaDesde,
+      fechaHasta,
     );
   }
 

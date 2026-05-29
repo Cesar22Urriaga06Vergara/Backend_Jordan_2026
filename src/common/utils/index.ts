@@ -1,4 +1,5 @@
 import * as bcrypt from 'bcrypt';
+export { MoneyUtil } from './money.util';
 
 export class PasswordUtil {
   static async hash(password: string, rounds: number = 10): Promise<string> {

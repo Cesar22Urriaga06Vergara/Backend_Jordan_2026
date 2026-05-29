@@ -5,6 +5,8 @@ import {
   IsPositive,
   IsOptional,
   IsArray,
+  Min,
+  Max,
   ValidateNested,
   IsDateString,
   IsBoolean,
@@ -16,12 +18,14 @@ export class DetallePedidoDto {
   @IsPositive()
   productoId: number;
 
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 0 })
   @IsPositive()
+  @Max(999)
   cantidad: number;
 
-  @IsNumber()
-  @IsPositive()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(99999999)
   precioUnitario: number;
 }
 

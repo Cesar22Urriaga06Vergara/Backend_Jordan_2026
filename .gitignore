@@ -1,15 +1,31 @@
 # dependencies
-node_modules
-dist
+node_modules/
 
 # environment variables
 .env
 .env.local
-.env.*.local
+.env.*
+!.env.example
+.env.development.local
+.env.test.local
+.env.production.local
+
+# secrets, certificates and backups
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+*.sql
+*.sql.gz
+*.dump
+*.backup
+backups/
 
 # IDEs and editors
-.vscode
-.idea
+.vscode/
+.idea/
 *.suo
 *.ntvs*
 *.njsproj
@@ -21,18 +37,28 @@ dist
 Thumbs.db
 
 # Logs
-logs
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
 # Prisma
 prisma/migrations/*
 !prisma/migrations/.gitkeep
 
 # Coverage
-coverage
+coverage/
 
 # Build
-build
+dist/
+build/
+.render/
+
+# TypeScript
+*.tsbuildinfo
+
+# Local runtime state
+.operability-last-run.json

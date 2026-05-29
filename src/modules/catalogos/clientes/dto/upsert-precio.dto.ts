@@ -4,6 +4,8 @@ import {
   IsOptional,
   IsBoolean,
   IsDateString,
+  Min,
+  Max,
 } from 'class-validator';
 
 export class UpsertPrecioClienteDto {
@@ -11,8 +13,9 @@ export class UpsertPrecioClienteDto {
   @IsPositive()
   productoId: number;
 
-  @IsNumber()
-  @IsPositive()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(99999999)
   precioUnitario: number;
 
   @IsOptional()

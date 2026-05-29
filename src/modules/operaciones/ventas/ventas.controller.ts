@@ -34,6 +34,25 @@ export class VentasController {
     );
   }
 
+  @Get('reporte/movimientos')
+  findAllForReport(
+    @Query('page') page = '1',
+    @Query('limit') limit = '10',
+    @Query('clienteId') clienteId?: string,
+    @Query('estado') estado?: EstadoVenta,
+    @Query('fechaDesde') fechaDesde?: string,
+    @Query('fechaHasta') fechaHasta?: string,
+  ) {
+    return this.ventasService.findAllForReport(
+      parseInt(page),
+      parseInt(limit),
+      clienteId ? parseInt(clienteId) : undefined,
+      estado,
+      fechaDesde,
+      fechaHasta,
+    );
+  }
+
   @Get('cartera/resumen')
   getCartera(@Query('clienteId') clienteId?: string) {
     return this.ventasService.getCartera(

@@ -12,11 +12,15 @@ export class EgresosController {
     @Query('page') page = '1',
     @Query('limit') limit = '20',
     @Query('fecha') fecha?: string,
+    @Query('fechaDesde') fechaDesde?: string,
+    @Query('fechaHasta') fechaHasta?: string,
     @Query('medioPago') medioPago?: string,
     @Query('search') search?: string,
   ) {
     const filtros: BuscarEgresosDto = {
       fecha,
+      fechaDesde,
+      fechaHasta,
       medioPago: medioPago as any,
       search,
     };

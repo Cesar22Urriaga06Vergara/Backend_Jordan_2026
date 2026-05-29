@@ -28,6 +28,11 @@ export class DiarioController {
     return this.diarioService.getHistorial(parseInt(page), parseInt(limit));
   }
 
+  @Get('dia-abierto-pendiente')
+  getDiaAbiertoPendiente(@Query('fecha') fecha?: string) {
+    return this.diarioService.getDiaAbiertoPendiente(fecha);
+  }
+
   @Post('apertura')
   @Roles('ADMIN')
   abrirDia(@Body() dto: AbrirDiaDto, @CurrentUser() user: any) {

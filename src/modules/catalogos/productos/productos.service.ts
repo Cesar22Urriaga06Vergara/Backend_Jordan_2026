@@ -2,11 +2,10 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
-  BadRequestException,
   Inject,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like } from 'typeorm';
+import { Repository, Like, Not, IsNull } from 'typeorm';
 import { Producto } from '../../../database/entities';
 import { CreateProductoDto } from './dto/create-producto.dto';
 import { UpdateProductoDto } from './dto/update-producto.dto';
@@ -23,6 +22,13 @@ export class ProductosService {
     private auditService: AuditService,
   ) {}
 
+  private withActivo(producto: Producto) {
+    return {
+      ...producto,
+      activo: !producto.deletedAt,
+    };
+  }
+
   async findAll(
     page = 1,
     limit = 10,
@@ -38,20 +44,23 @@ export class ProductosService {
     if (categoria) {
       where['categoria'] = categoria;
     }
-    if (activo !== undefined) {
-      where['activo'] = activo;
+    if (activo === false) {
+      where['deletedAt'] = Not(IsNull());
     }
 
     const [data, total] = await this.productoRepo.findAndCount({
       where,
+      withDeleted: activo === false,
       order: { nombre: 'ASC' },
       skip: (page - 1) * limit,
       take: limit,
     });
 
+    const items = data.map((producto) => this.withActivo(producto));
+
     return {
-      data,
-      items: data,
+      data: items,
+      items,
       total,
       page,
       limit,
@@ -64,13 +73,24 @@ export class ProductosService {
     if (!producto) {
       throw new NotFoundException(`Producto con id ${id} no encontrado`);
     }
+    return this.withActivo(producto);
+  }
+
+  private async findOneWithDeleted(id: number) {
+    const producto = await this.productoRepo.findOne({
+      where: { id },
+      withDeleted: true,
+    });
+    if (!producto) {
+      throw new NotFoundException(`Producto con id ${id} no encontrado`);
+    }
     return producto;
   }
 
   async findByCodigo(codigo: string) {
     const producto = await this.productoRepo.findOne({ where: { codigo } });
     if (!producto) {
-      throw new NotFoundException(`Producto con código ${codigo} no encontrado`);
+      throw new NotFoundException(`Producto con codigo ${codigo} no encontrado`);
     }
     return producto;
   }
@@ -79,12 +99,14 @@ export class ProductosService {
     try {
       const existe = await this.productoRepo.findOne({
         where: { codigo: dto.codigo },
+        withDeleted: true,
       });
       if (existe) {
-        throw new ConflictException(`Ya existe un producto con código ${dto.codigo}`);
+        throw new ConflictException(`Ya existe un producto con codigo ${dto.codigo}`);
       }
 
-      const producto = this.productoRepo.create(dto);
+      const { activo: _activo, ...payload } = dto;
+      const producto = this.productoRepo.create(payload);
       const resultado = await this.productoRepo.save(producto);
 
       this.logger.logOperation('CREATE', 'Producto', resultado.id, {
@@ -96,10 +118,10 @@ export class ProductosService {
       await this.auditService.registrarActividad({
         usuarioId: dto.usuarioId || 0,
         accion: 'CREAR_PRODUCTO',
-        descripcion: `Creó producto ${resultado.codigo}: ${resultado.nombre}`,
+        descripcion: `Creo producto ${resultado.codigo}: ${resultado.nombre}`,
       });
 
-      return resultado;
+      return this.withActivo(resultado);
     } catch (error) {
       this.logger.logCriticalError('Error creating producto', error);
       throw error;
@@ -113,14 +135,15 @@ export class ProductosService {
       if (dto.codigo && dto.codigo !== productoAnterior.codigo) {
         const existe = await this.productoRepo.findOne({
           where: { codigo: dto.codigo },
+          withDeleted: true,
         });
         if (existe) {
-          throw new ConflictException(`Ya existe un producto con código ${dto.codigo}`);
+          throw new ConflictException(`Ya existe un producto con codigo ${dto.codigo}`);
         }
       }
 
-      // Detectar cambios
-      const cambios = this.auditService.detectarCambios(productoAnterior, dto);
+      const { activo: _activo, ...payload } = dto;
+      const cambios = this.auditService.detectarCambios(productoAnterior, payload);
       if (Object.keys(cambios).length > 0) {
         for (const [campo, { antes, despues }] of Object.entries(cambios)) {
           await this.auditService.registrarCambio({
@@ -130,12 +153,12 @@ export class ProductosService {
             campo,
             valorAnterior: antes,
             valorNuevo: despues,
-            razonCambio: dto.razonCambio || 'Actualización',
+            razonCambio: dto.razonCambio || 'Actualizacion',
           });
         }
       }
 
-      Object.assign(productoAnterior, dto);
+      Object.assign(productoAnterior, payload);
       const resultado = await this.productoRepo.save(productoAnterior);
 
       this.logger.logOperation('UPDATE', 'Producto', id, {
@@ -144,7 +167,7 @@ export class ProductosService {
         path: `/catalogos/productos/${id}`,
       });
 
-      return resultado;
+      return this.withActivo(resultado);
     } catch (error) {
       this.logger.logCriticalError('Error updating producto', error);
       throw error;
@@ -153,19 +176,21 @@ export class ProductosService {
 
   async toggleActivo(id: number, usuarioId: number = 0) {
     try {
-      const producto = await this.findOne(id);
-      const estadoAnterior = producto.activo;
-      producto.activo = !producto.activo;
-      const resultado = await this.productoRepo.save(producto);
+      const producto = await this.findOneWithDeleted(id);
+      const estadoAnterior = !producto.deletedAt;
+      const resultado = producto.deletedAt
+        ? await this.productoRepo.recover(producto)
+        : await this.productoRepo.softRemove(producto);
+      const estadoNuevo = !resultado.deletedAt;
 
       await this.auditService.registrarCambio({
         usuarioId,
         entidad: 'Producto',
         registroId: id,
-        campo: 'activo',
+        campo: 'deletedAt',
         valorAnterior: estadoAnterior,
-        valorNuevo: resultado.activo,
-        razonCambio: `Cambio de estado a ${resultado.activo ? 'activo' : 'inactivo'}`,
+        valorNuevo: estadoNuevo,
+        razonCambio: `Cambio de estado a ${estadoNuevo ? 'activo' : 'inactivo'}`,
       });
 
       this.logger.logOperation('UPDATE', 'Producto', id, {
@@ -174,7 +199,7 @@ export class ProductosService {
         path: `/catalogos/productos/${id}/toggle`,
       });
 
-      return resultado;
+      return this.withActivo(resultado);
     } catch (error) {
       this.logger.logCriticalError('Error toggling producto activo', error);
       throw error;
@@ -185,19 +210,12 @@ export class ProductosService {
     const producto = await this.findOne(id);
 
     try {
-      await this.productoRepo.delete(id);
+      await this.productoRepo.softRemove(producto);
     } catch (error) {
-      // FK constraint: producto tiene movimientos o pedidos asociados
-      if ((error as any)?.code === 'ER_ROW_IS_REFERENCED_2' || (error as any)?.errno === 1451) {
-        throw new BadRequestException(
-          'No se puede eliminar el producto porque tiene movimientos o pedidos registrados. Puede desactivarlo en su lugar.',
-        );
-      }
       this.logger.logCriticalError('Error deleting producto', error);
       throw error;
     }
 
-    // Auditoría no bloquea la respuesta
     try {
       this.logger.logOperation('DELETE', 'Producto', id, {
         statusCode: 200,
@@ -207,10 +225,10 @@ export class ProductosService {
       await this.auditService.registrarActividad({
         usuarioId,
         accion: 'ELIMINAR_PRODUCTO',
-        descripcion: `Eliminó producto ${producto.codigo}: ${producto.nombre}`,
+        descripcion: `Elimino producto ${producto.codigo}: ${producto.nombre}`,
       });
     } catch (auditError) {
-      this.logger.logCriticalError('Error en auditoría de eliminación', auditError);
+      this.logger.logCriticalError('Error en auditoria de eliminacion', auditError);
     }
 
     return { message: `Producto ${producto.codigo} eliminado correctamente` };

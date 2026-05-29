@@ -4,6 +4,8 @@ import {
   IsOptional,
   IsString,
   IsArray,
+  Min,
+  Max,
   ValidateNested,
   IsDateString,
 } from 'class-validator';
@@ -14,8 +16,9 @@ export class InventarioInicialItemDto {
   @IsPositive()
   productoId: number;
 
-  @IsNumber()
-  @IsPositive()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(999999)
   cantidadInicial: number;
 }
 
@@ -23,7 +26,9 @@ export class AbrirDiaDto {
   @IsDateString()
   fecha: string;
 
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(99999999)
   saldoInicial: number;
 
   @IsArray()
@@ -41,8 +46,9 @@ export class ProduccionItemDto {
   @IsPositive()
   productoId: number;
 
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
   @IsPositive()
+  @Max(999999)
   cantidad: number;
 
   @IsOptional()
@@ -62,7 +68,9 @@ export class CierreInventarioItemDto {
   @IsPositive()
   productoId: number;
 
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(999999)
   cantidadContada: number;
 
   @IsOptional()
@@ -71,7 +79,9 @@ export class CierreInventarioItemDto {
 }
 
 export class CerrarDiaDto {
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(99999999)
   saldoContado: number;
 
   @IsArray()

@@ -1,7 +1,26 @@
 const fs = require('node:fs/promises');
+const fsSync = require('node:fs');
 const path = require('node:path');
 
-const API_BASE = process.env.API_BASE || 'http://localhost:3001/api';
+function loadEnvFile(filePath) {
+  if (!fsSync.existsSync(filePath)) return;
+  const raw = fsSync.readFileSync(filePath, 'utf8');
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const separator = trimmed.indexOf('=');
+    if (separator === -1) continue;
+    const key = trimmed.slice(0, separator).trim();
+    const value = trimmed.slice(separator + 1).trim().replace(/^['"]|['"]$/g, '');
+    if (!process.env[key]) process.env[key] = value;
+  }
+}
+
+loadEnvFile(path.join(__dirname, '.env.local'));
+loadEnvFile(path.join(__dirname, '.env'));
+
+const API_BASE =
+  process.env.API_BASE || `http://localhost:${process.env.PORT || '3000'}/api`;
 const OUTPUT_FILE = path.join(__dirname, '.operability-last-run.json');
 
 async function requestJson(url, options = {}) {
@@ -31,18 +50,18 @@ async function testAPI() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        email: 'admin@jordan.local',
-        password: 'admin123456',
+        email: process.env.TEST_ADMIN_EMAIL || 'admin@jordan.local',
+        password: process.env.TEST_ADMIN_PASSWORD || 'admin123456',
       }),
     });
     requireStatus('Login', login.response.status, 201);
 
-    const token = login.body?.data?.access_token;
-    if (!token) {
-      throw new Error('Login sin access_token');
+    const authCookie = login.response.headers.get('set-cookie');
+    if (!authCookie) {
+      throw new Error('Login sin cookie de autenticacion');
     }
     const headers = {
-      Authorization: `Bearer ${token}`,
+      Cookie: authCookie,
       'Content-Type': 'application/json',
     };
 
@@ -53,7 +72,7 @@ async function testAPI() {
       body: JSON.stringify({
         nombre: `QA Usuario ${runId}`,
         email: usuarioEmail,
-        password: 'qa12345678',
+        password: process.env.TEST_USER_PASSWORD || 'changeme',
         rol: 'ADMIN',
       }),
     });
@@ -90,7 +109,7 @@ async function testAPI() {
 
     console.log('5) Listar y validar presencia');
     const listUsers = await requestJson(`${API_BASE}/users?page=1&limit=200`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Cookie: authCookie },
     });
     requireStatus('Listar usuarios', listUsers.response.status, 200);
     const usersItems = listUsers.body?.data?.items || [];
@@ -101,7 +120,7 @@ async function testAPI() {
 
     const listProductos = await requestJson(
       `${API_BASE}/catalogos/productos?page=1&limit=200`,
-      { headers: { Authorization: `Bearer ${token}` } },
+      { headers: { Cookie: authCookie } },
     );
     requireStatus('Listar productos', listProductos.response.status, 200);
     const productosItems = listProductos.body?.data?.items || [];
@@ -112,7 +131,7 @@ async function testAPI() {
 
     const listClientes = await requestJson(
       `${API_BASE}/catalogos/clientes?page=1&limit=200`,
-      { headers: { Authorization: `Bearer ${token}` } },
+      { headers: { Cookie: authCookie } },
     );
     requireStatus('Listar clientes', listClientes.response.status, 200);
     const clientesItems = listClientes.body?.data?.items || [];
@@ -123,19 +142,19 @@ async function testAPI() {
 
     console.log('6) Recarga simulada (relectura por ID)');
     const readUser = await requestJson(`${API_BASE}/users/${usuario.id}`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Cookie: authCookie },
     });
     requireStatus('Leer usuario por ID', readUser.response.status, 200);
 
     const readProducto = await requestJson(
       `${API_BASE}/catalogos/productos/${producto.id}`,
-      { headers: { Authorization: `Bearer ${token}` } },
+      { headers: { Cookie: authCookie } },
     );
     requireStatus('Leer producto por ID', readProducto.response.status, 200);
 
     const readCliente = await requestJson(
       `${API_BASE}/catalogos/clientes/${cliente.id}`,
-      { headers: { Authorization: `Bearer ${token}` } },
+      { headers: { Cookie: authCookie } },
     );
     requireStatus('Leer cliente por ID', readCliente.response.status, 200);
 

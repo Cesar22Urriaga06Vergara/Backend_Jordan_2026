@@ -44,10 +44,18 @@ export class GlobalExceptionFilter implements ExceptionFilter {
           message = 'Error de validación';
         }
       }
+      this.logger.warn(
+        `[${requestId}] ${request.method} ${request.url} -> ${status} ${message}`,
+        exception instanceof Error ? exception.stack : undefined,
+      );
     } else if (exception instanceof Error) {
       this.logger.error(
         `Unhandled exception: ${exception.message}`,
         exception.stack,
+      );
+    } else {
+      this.logger.error(
+        `Unhandled exception: ${JSON.stringify(exception)}`,
       );
     }
 

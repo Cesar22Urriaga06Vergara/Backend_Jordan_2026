@@ -5,7 +5,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, EntityManager, In } from 'typeorm';
 import {
   AperturaDiaria,
   InventarioInicial,
@@ -34,6 +34,8 @@ import {
   RegistrarProduccionDto,
   CerrarDiaDto,
 } from './dto/diario.dto';
+import { ConsecutivoService } from '../../common/services/consecutivo.service';
+import { MoneyUtil } from '../../common/utils';
 
 @Injectable()
 export class DiarioService {
@@ -63,6 +65,7 @@ export class DiarioService {
     @InjectRepository(TrabajadorLabor)
     private trabajadorLaborRepo: Repository<TrabajadorLabor>,
     private dataSource: DataSource,
+    private consecutivoService: ConsecutivoService,
   ) {}
 
   private canReuseOpenDayInDevelopment() {
@@ -100,8 +103,44 @@ export class DiarioService {
     return { start, end };
   }
 
+  private async limpiarCierreDelDiaEnDesarrollo(
+    manager: EntityManager,
+    fechaStr: string,
+  ) {
+    if (!this.canReuseOpenDayInDevelopment()) return;
+
+    const cierres = await manager
+      .createQueryBuilder(CierreDiario, 'c')
+      .where('DATE(c.fecha) = :fecha', { fecha: fechaStr })
+      .getMany();
+
+    const cierreIds = cierres.map((cierre) => cierre.id);
+    const cierreCajaIds = cierres
+      .map((cierre) => cierre.cierreCajaId)
+      .filter((id): id is number => Number.isFinite(Number(id)));
+
+    if (cierreIds.length > 0) {
+      await manager.delete(CierreInventario, { cierreDiarioId: In(cierreIds) });
+      await manager.delete(CierreDiario, { id: In(cierreIds) });
+    }
+
+    const cajasHuerfanas = await manager
+      .createQueryBuilder(CierreCaja, 'cc')
+      .leftJoin(CierreDiario, 'cd', 'cd.cierreCajaId = cc.id')
+      .where('DATE(cc.fecha) = :fecha', { fecha: fechaStr })
+      .andWhere('cd.id IS NULL')
+      .getMany();
+
+    cierreCajaIds.push(...cajasHuerfanas.map((caja) => caja.id));
+
+    const uniqueCajaIds = [...new Set(cierreCajaIds)];
+    if (uniqueCajaIds.length > 0) {
+      await manager.delete(CierreCaja, { id: In(uniqueCajaIds) });
+    }
+  }
+
   private async garantizarCarteraPendientePorPedidosEntregados(
-    manager: DataSource['manager'],
+    manager: EntityManager,
     fechaStr: string,
   ) {
     const pedidosEntregados = await manager
@@ -114,14 +153,11 @@ export class DiarioService {
     const fechaOperacion = this.buildLocalDate(fechaStr);
 
     for (const pedido of pedidosEntregados) {
-      const totalPedido = Number(
-        (pedido.detalles ?? []).reduce(
-          (acc, det) => acc + Number(det.subtotal ?? 0),
-          0,
-        ),
+      const totalPedido = MoneyUtil.add(
+        ...(pedido.detalles ?? []).map((det) => det.subtotal ?? 0),
       );
 
-      if (totalPedido <= 0) {
+      if (MoneyUtil.compare(totalPedido, 0) <= 0) {
         continue;
       }
 
@@ -131,13 +167,11 @@ export class DiarioService {
       });
 
       if (!venta) {
-        const hoy = new Date();
-        const numPrefix = `VEN-${hoy.getFullYear()}${String(hoy.getMonth() + 1).padStart(2, '0')}${String(hoy.getDate()).padStart(2, '0')}`;
-        const countVentas = await manager
-          .createQueryBuilder(Venta, 'v')
-          .where('v.numero LIKE :p', { p: `${numPrefix}%` })
-          .getCount();
-        const numeroVenta = `${numPrefix}-${String(countVentas + 1).padStart(3, '0')}`;
+        const numeroVenta = await this.consecutivoService.generar(
+          'VEN',
+          fechaOperacion,
+          manager,
+        );
 
         venta = await manager.save(
           Venta,
@@ -168,8 +202,8 @@ export class DiarioService {
         }
       }
 
-      const saldoPendiente = Number(venta.saldoPendiente ?? 0);
-      if (saldoPendiente <= 0) {
+      const saldoPendiente = MoneyUtil.normalize(venta.saldoPendiente ?? 0);
+      if (MoneyUtil.compare(saldoPendiente, 0) <= 0) {
         continue;
       }
 
@@ -237,23 +271,29 @@ export class DiarioService {
 
     for (const mov of movimientos) {
       const esIngreso = String(mov.tipo ?? '').startsWith('INGRESO');
-      const monto = Number(mov.monto ?? 0);
-      if (!Number.isFinite(monto) || monto <= 0) continue;
+      const monto = MoneyUtil.normalize(mov.monto ?? 0);
+      if (MoneyUtil.compare(monto, 0) <= 0) continue;
 
       if (esIngreso) {
         if (mov.medioPago === 'EFECTIVO') {
-          ingresosEfectivo += monto;
+          ingresosEfectivo = MoneyUtil.add(ingresosEfectivo, monto);
         } else {
-          ingresosTransferencias += monto;
+          ingresosTransferencias = MoneyUtil.add(
+            ingresosTransferencias,
+            monto,
+          );
         }
       } else {
-        egresos += monto;
+        egresos = MoneyUtil.add(egresos, monto);
       }
     }
 
-    const aperturaHoy = Number(apertura?.saldoInicial ?? 0);
-    const ingresosTotal = ingresosEfectivo + ingresosTransferencias;
-    const saldoEstimadoCaja = aperturaHoy + ingresosEfectivo - egresos;
+    const aperturaHoy = MoneyUtil.normalize(apertura?.saldoInicial ?? 0);
+    const ingresosTotal = MoneyUtil.add(ingresosEfectivo, ingresosTransferencias);
+    const saldoEstimadoCaja = MoneyUtil.subtract(
+      MoneyUtil.add(aperturaHoy, ingresosEfectivo),
+      egresos,
+    );
 
     const ventasHoy = await this.dataSource.manager
       .createQueryBuilder(Venta, 'v')
@@ -266,7 +306,7 @@ export class DiarioService {
       .where('c.saldoPendiente > 0')
       .getRawOne<{ total: string }>();
 
-    const carteraTotal = Number(carteraRaw?.total ?? 0);
+    const carteraTotal = MoneyUtil.normalize(carteraRaw?.total ?? 0);
 
     return {
       fecha: fechaStr,
@@ -285,6 +325,35 @@ export class DiarioService {
         egresos,
         saldoEstimadoCaja,
       },
+    };
+  }
+
+  async getDiaAbiertoPendiente(fecha?: string) {
+    const fechaReferencia = this.getFechaLocalISO(fecha);
+    const apertura = await this.aperturaRepo
+      .createQueryBuilder('a')
+      .where(
+        `NOT EXISTS (
+          SELECT 1
+          FROM cierre_diario c
+          WHERE DATE(c.fecha) = DATE(a.fecha)
+        )`,
+      )
+      .orderBy('a.fecha', 'ASC')
+      .getOne();
+
+    if (!apertura) {
+      return null;
+    }
+
+    const fechaAbierta = this.getFechaLocalISO(apertura.fecha.toISOString());
+
+    return {
+      aperturaId: apertura.id,
+      fecha: fechaAbierta,
+      esFechaActual: fechaAbierta === fechaReferencia,
+      saldoInicial: MoneyUtil.normalize(apertura.saldoInicial ?? 0),
+      createdAt: apertura.createdAt,
     };
   }
 
@@ -325,18 +394,23 @@ export class DiarioService {
 
     if (existente) {
       if (this.canReuseOpenDayInDevelopment() && !cierreExistente) {
-        return this.aperturaRepo.findOne({
-          where: { id: existente.id },
-          relations: ['inventariosInicial', 'inventariosInicial.producto'],
+        return this.dataSource.transaction(async (manager) => {
+          await this.limpiarCierreDelDiaEnDesarrollo(manager, fechaStr);
+          return manager.findOne(AperturaDiaria, {
+            where: { id: existente.id },
+            relations: ['inventariosInicial', 'inventariosInicial.producto'],
+          });
         });
       }
 
       // En modo desarrollo: si el día ya fue cerrado, eliminar el cierre para poder reabrirlo
       if (this.canReuseOpenDayInDevelopment() && cierreExistente) {
-        await this.cierreDiarioRepo.delete({ id: cierreExistente.id });
-        return this.aperturaRepo.findOne({
-          where: { id: existente.id },
-          relations: ['inventariosInicial', 'inventariosInicial.producto'],
+        return this.dataSource.transaction(async (manager) => {
+          await this.limpiarCierreDelDiaEnDesarrollo(manager, fechaStr);
+          return manager.findOne(AperturaDiaria, {
+            where: { id: existente.id },
+            relations: ['inventariosInicial', 'inventariosInicial.producto'],
+          });
         });
       }
 
@@ -492,6 +566,7 @@ export class DiarioService {
     const pedidosFinalizados = pedidosPendientesCierre === 0;
 
     return this.dataSource.transaction(async (manager) => {
+      await this.limpiarCierreDelDiaEnDesarrollo(manager, fechaStr);
       await this.garantizarCarteraPendientePorPedidosEntregados(
         manager,
         fechaStr,
@@ -511,20 +586,24 @@ export class DiarioService {
         const esIngreso = mov.tipo.startsWith('INGRESO');
         if (esIngreso) {
           if (mov.medioPago === 'EFECTIVO') {
-            totalEfectivo += Number(mov.monto);
+            totalEfectivo = MoneyUtil.add(totalEfectivo, mov.monto);
           } else {
-            totalTransferencias += Number(mov.monto);
+            totalTransferencias = MoneyUtil.add(
+              totalTransferencias,
+              mov.monto,
+            );
           }
         } else {
-          totalEgresos += Number(mov.monto);
+          totalEgresos = MoneyUtil.add(totalEgresos, mov.monto);
         }
       }
 
-      const saldoCalculado =
-        Number(apertura.saldoInicial) +
-        totalEfectivo -
-        totalEgresos;
-      const diferenciaCaja = dto.saldoContado - saldoCalculado;
+      const saldoCalculado = MoneyUtil.subtract(
+        MoneyUtil.add(apertura.saldoInicial, totalEfectivo),
+        totalEgresos,
+      );
+      const saldoContado = MoneyUtil.normalize(dto.saldoContado);
+      const diferenciaCaja = MoneyUtil.subtract(saldoContado, saldoCalculado);
 
       // Crear cierre caja
       const cierreCaja = await manager.save(
@@ -535,7 +614,7 @@ export class DiarioService {
           totalTransferencias,
           totalEgresos,
           saldoCalculado,
-          saldoContado: dto.saldoContado,
+          saldoContado,
           diferencia: diferenciaCaja,
           observaciones: dto.observaciones,
         }),

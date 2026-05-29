@@ -13,9 +13,11 @@ import {
   AnticipoPrestamo,
   AbonoDeuda,
   MovimientoCaja,
+  LaborTipo,
 } from '../../database/entities';
 import {
   EstadoAnticipoPrestamo,
+  TipoLabor,
   TipoMovimientoCaja,
   TipoPago,
 } from '../../common/enums';
@@ -25,6 +27,9 @@ import {
   RegistrarAnticipoDto,
   AbonarDeudaDto,
 } from './dto/trabajadores-ops.dto';
+import { ConsecutivoService } from '../../common/services/consecutivo.service';
+import { MoneyUtil } from '../../common/utils';
+import { LaborTiposService } from '../catalogos/labor-tipos/labor-tipos.service';
 
 @Injectable()
 export class TrabajadoresOpsService {
@@ -43,8 +48,18 @@ export class TrabajadoresOpsService {
     private abonoRepo: Repository<AbonoDeuda>,
     @InjectRepository(MovimientoCaja)
     private cajaMov: Repository<MovimientoCaja>,
+    @InjectRepository(LaborTipo)
+    private laborTipoRepo: Repository<LaborTipo>,
+    private laborTiposService: LaborTiposService,
     private dataSource: DataSource,
+    private consecutivoService: ConsecutivoService,
   ) {}
+
+  private unidadFromTipo(tipo?: TipoLabor) {
+    if (tipo === TipoLabor.POR_PACA) return 'PACA';
+    if (tipo === TipoLabor.POR_HORA) return 'HORA';
+    return 'JORNADA';
+  }
 
   private getFechaLocalISO(fecha?: string) {
     if (fecha) {
@@ -77,8 +92,22 @@ export class TrabajadoresOpsService {
     return { start, end };
   }
 
-  async getLaboresToday(trabajadorId?: number, fecha?: string) {
-    const { start, end } = this.getDayRange(fecha);
+  async getTiposLabor() {
+    return this.laborTiposService.findAll(true);
+  }
+
+  async getLaboresToday(
+    trabajadorId?: number,
+    fecha?: string,
+    fechaDesde?: string,
+    fechaHasta?: string,
+  ) {
+    const { start, end } = fecha
+      ? this.getDayRange(fecha)
+      : {
+          start: this.getDayRange(fechaDesde).start,
+          end: this.getDayRange(fechaHasta ?? fechaDesde).end,
+        };
 
     const qb = this.laborRepo
       .createQueryBuilder('l')
@@ -92,102 +121,148 @@ export class TrabajadoresOpsService {
   }
 
   async registrarLabor(dto: RegistrarLaborDto) {
-    const trabajador = await this.trabajadorRepo.findOne({
-      where: { id: dto.trabajadorId, activo: true },
-    });
-    if (!trabajador) throw new NotFoundException(`Trabajador ${dto.trabajadorId} no encontrado`);
-
-    const tarifa = await this.tarifaRepo.findOne({
-      where: { id: dto.laborTarifaId, trabajadorId: dto.trabajadorId },
-    });
-    if (!tarifa) {
-      throw new NotFoundException(
-        `Tarifa ${dto.laborTarifaId} no encontrada para el trabajador`,
-      );
-    }
-
     const cantidad = Number(dto.cantidadRealizado ?? 1);
     if (cantidad <= 0) {
       throw new BadRequestException('La cantidad debe ser mayor a 0');
     }
 
-    // La labor siempre se liquida con la tarifa vigente en BD para evitar desfases del frontend.
-    const montoCalculado = Number(tarifa.tarifa) * cantidad;
+    return this.dataSource.transaction(async (manager) => {
+      const trabajador = await manager.findOne(Trabajador, {
+        where: { id: dto.trabajadorId },
+      });
+      if (!trabajador) throw new NotFoundException(`Trabajador ${dto.trabajadorId} no encontrado`);
 
-    const labor = this.laborRepo.create({
-      trabajadorId: dto.trabajadorId,
-      laborTarifaId: dto.laborTarifaId,
-      fecha: this.parseFechaLocalToDate(dto.fecha),
-      cantidadRealizado: cantidad,
-      montoAPagar: montoCalculado,
-      observaciones: dto.observaciones,
+      let tarifa = dto.laborTarifaId
+        ? await manager.findOne(LaborTarifa, {
+            where: { id: dto.laborTarifaId, trabajadorId: dto.trabajadorId },
+            relations: ['laborTipo'],
+          })
+        : null;
+
+      if (!tarifa && dto.laborTipoId) {
+        const laborTipo = await manager.findOne(LaborTipo, {
+          where: { id: dto.laborTipoId, activo: true },
+        });
+        if (!laborTipo) {
+          throw new NotFoundException(`Tipo de labor ${dto.laborTipoId} no encontrado`);
+        }
+
+        const valorUnitario = MoneyUtil.normalize(dto.valorUnitario ?? 0);
+        if (MoneyUtil.compare(valorUnitario, 0) <= 0) {
+          throw new BadRequestException('El valor unitario debe ser mayor a 0');
+        }
+
+        tarifa = await manager.findOne(LaborTarifa, {
+          where: { trabajadorId: dto.trabajadorId, laborTipoId: laborTipo.id },
+          relations: ['laborTipo'],
+        });
+
+        if (!tarifa) {
+          tarifa = manager.create(LaborTarifa, {
+            trabajadorId: dto.trabajadorId,
+            laborTipoId: laborTipo.id,
+            tarifa: valorUnitario,
+            horas: laborTipo.tipo === TipoLabor.POR_JORNADA ? 8 : 1,
+            unidad: this.unidadFromTipo(laborTipo.tipo),
+            activo: true,
+            laborTipo,
+          });
+        } else {
+          tarifa.tarifa = valorUnitario;
+          tarifa.unidad = this.unidadFromTipo(laborTipo.tipo);
+          tarifa.activo = true;
+          tarifa.laborTipo = laborTipo;
+        }
+
+        tarifa = await manager.save(LaborTarifa, tarifa);
+      }
+
+      if (!tarifa) {
+        throw new NotFoundException(
+          'Debe seleccionar una tarifa existente o definir tipo de labor y valor unitario',
+        );
+      }
+
+      const valorUnitario = MoneyUtil.normalize(dto.valorUnitario ?? tarifa.tarifa);
+      const montoCalculado = MoneyUtil.multiply(valorUnitario, cantidad);
+
+      const labor = manager.create(TrabajadorLabor, {
+        trabajadorId: dto.trabajadorId,
+        laborTarifaId: tarifa.id,
+        fecha: this.parseFechaLocalToDate(dto.fecha),
+        cantidadRealizado: cantidad,
+        montoAPagar: montoCalculado,
+        observaciones: dto.observaciones,
+      });
+
+      trabajador.saldoTotal = MoneyUtil.add(trabajador.saldoTotal, montoCalculado);
+      await manager.save(Trabajador, trabajador);
+
+      return manager.save(TrabajadorLabor, labor);
     });
-
-    // Actualizar saldo trabajador
-    trabajador.saldoTotal =
-      Number(trabajador.saldoTotal) + montoCalculado;
-    await this.trabajadorRepo.save(trabajador);
-
-    return this.laborRepo.save(labor);
   }
 
   async pagarTrabajador(dto: PagarTrabajadorDto, usuarioId: number) {
     const trabajador = await this.trabajadorRepo.findOne({
-      where: { id: dto.trabajadorId, activo: true },
+      where: { id: dto.trabajadorId },
     });
     if (!trabajador) throw new NotFoundException(`Trabajador ${dto.trabajadorId} no encontrado`);
 
     return this.dataSource.transaction(async (manager) => {
-      const montoEntregado =
-        Number(dto.montoBase) -
-        Number(dto.descuentosAplicados ?? 0) -
-        Number(dto.abonoADeuda ?? 0);
+      const montoBase = MoneyUtil.normalize(dto.montoBase);
+      const descuentosAplicados = MoneyUtil.normalize(
+        dto.descuentosAplicados ?? 0,
+      );
+      const abonoADeuda = MoneyUtil.normalize(dto.abonoADeuda ?? 0);
+      const montoEntregado = MoneyUtil.subtract(
+        montoBase,
+        descuentosAplicados,
+        abonoADeuda,
+      );
 
-      if (montoEntregado < 0) {
+      if (MoneyUtil.compare(montoEntregado, 0) < 0) {
         throw new BadRequestException(
           `El monto entregado (${montoEntregado}) no puede ser negativo`,
         );
       }
 
       const hoy = this.parseFechaLocalToDate(dto.fecha);
-      const prefix = `PAG-T-${hoy.getFullYear()}${String(hoy.getMonth() + 1).padStart(2, '0')}${String(hoy.getDate()).padStart(2, '0')}`;
-      const count = await manager
-        .createQueryBuilder(PagoTrabajador, 'p')
-        .where('p.numero LIKE :p', { p: `${prefix}%` })
-        .getCount();
-      const numero = `${prefix}-${String(count + 1).padStart(3, '0')}`;
+      const numero = await this.consecutivoService.generar(
+        'PAG-T',
+        hoy,
+        manager,
+      );
 
       const pago = manager.create(PagoTrabajador, {
         numero,
         trabajadorId: dto.trabajadorId,
         usuarioId,
         fecha: hoy,
-        montoBase: dto.montoBase,
-        descuentosAplicados: dto.descuentosAplicados ?? 0,
-        abonoADeuda: dto.abonoADeuda ?? 0,
+        montoBase,
+        descuentosAplicados,
+        abonoADeuda,
         montoEntregado,
         observaciones: dto.observaciones,
       });
       await manager.save(PagoTrabajador, pago);
 
       // Reducir saldo total del trabajador
-      trabajador.saldoTotal = Math.max(
-        0,
-        Number(trabajador.saldoTotal) - Number(dto.montoBase),
+      trabajador.saldoTotal = MoneyUtil.maxZero(
+        MoneyUtil.subtract(trabajador.saldoTotal, montoBase),
       );
       await manager.save(Trabajador, trabajador);
 
       // Movimiento caja egreso
-      const cajaPrefix = `CAJ-${hoy.getFullYear()}${String(hoy.getMonth() + 1).padStart(2, '0')}${String(hoy.getDate()).padStart(2, '0')}`;
-      const cajaCnt = await manager
-        .createQueryBuilder(MovimientoCaja, 'm')
-        .where('m.numero LIKE :p', { p: `${cajaPrefix}%` })
-        .getCount();
+      const numeroCaja = await this.consecutivoService.generar(
+        'CAJ',
+        hoy,
+        manager,
+      );
 
       await manager.save(
         MovimientoCaja,
         manager.create(MovimientoCaja, {
-          numero: `${cajaPrefix}-${String(cajaCnt + 1).padStart(3, '0')}`,
+          numero: numeroCaja,
           tipo: TipoMovimientoCaja.PAGO_TRABAJADOR,
           medioPago: TipoPago.EFECTIVO,
           monto: montoEntregado,
@@ -203,24 +278,24 @@ export class TrabajadoresOpsService {
 
   async registrarAnticipo(dto: RegistrarAnticipoDto) {
     const trabajador = await this.trabajadorRepo.findOne({
-      where: { id: dto.trabajadorId, activo: true },
+      where: { id: dto.trabajadorId },
     });
     if (!trabajador) throw new NotFoundException(`Trabajador ${dto.trabajadorId} no encontrado`);
 
     return this.dataSource.transaction(async (manager) => {
       const hoy = this.parseFechaLocalToDate(dto.fecha);
-      const prefix = `ANT-${hoy.getFullYear()}${String(hoy.getMonth() + 1).padStart(2, '0')}${String(hoy.getDate()).padStart(2, '0')}`;
-      const count = await manager
-        .createQueryBuilder(AnticipoPrestamo, 'a')
-        .where('a.numero LIKE :p', { p: `${prefix}%` })
-        .getCount();
-      const numero = `${prefix}-${String(count + 1).padStart(3, '0')}`;
+      const monto = MoneyUtil.normalize(dto.monto);
+      const numero = await this.consecutivoService.generar(
+        'ANT',
+        hoy,
+        manager,
+      );
 
       const anticipo = manager.create(AnticipoPrestamo, {
         numero,
         trabajadorId: dto.trabajadorId,
         tipo: dto.tipo,
-        monto: dto.monto,
+        monto,
         estado: EstadoAnticipoPrestamo.ACTIVO,
         fecha: hoy,
         motivo: dto.motivo,
@@ -229,11 +304,11 @@ export class TrabajadoresOpsService {
       const savedAnticipo = await manager.save(AnticipoPrestamo, anticipo);
 
       // Movimiento caja
-      const cajaPrefix = `CAJ-${hoy.getFullYear()}${String(hoy.getMonth() + 1).padStart(2, '0')}${String(hoy.getDate()).padStart(2, '0')}`;
-      const cajaCnt = await manager
-        .createQueryBuilder(MovimientoCaja, 'm')
-        .where('m.numero LIKE :p', { p: `${cajaPrefix}%` })
-        .getCount();
+      const numeroCaja = await this.consecutivoService.generar(
+        'CAJ',
+        hoy,
+        manager,
+      );
 
       const tipoMov =
         dto.tipo === 'PRESTAMO'
@@ -243,10 +318,10 @@ export class TrabajadoresOpsService {
       await manager.save(
         MovimientoCaja,
         manager.create(MovimientoCaja, {
-          numero: `${cajaPrefix}-${String(cajaCnt + 1).padStart(3, '0')}`,
+          numero: numeroCaja,
           tipo: tipoMov,
           medioPago: TipoPago.EFECTIVO,
-          monto: dto.monto,
+          monto,
           fecha: hoy,
           trabajadorId: dto.trabajadorId,
           concepto: `${dto.tipo} - ${trabajador.nombre}`,
@@ -275,27 +350,31 @@ export class TrabajadoresOpsService {
       .select('SUM(a.monto)', 'total')
       .getRawOne<{ total: string }>();
 
-    const montoAbonadoAntes = Number(totalAbonado?.total ?? 0);
-    const saldoPendiente =
-      Number(anticipo.monto) - montoAbonadoAntes - Number(dto.monto);
+    const montoAbonadoAntes = MoneyUtil.normalize(totalAbonado?.total ?? 0);
+    const montoAbono = MoneyUtil.normalize(dto.monto);
+    const saldoPendiente = MoneyUtil.subtract(
+      anticipo.monto,
+      montoAbonadoAntes,
+      montoAbono,
+    );
 
-    if (saldoPendiente < 0) {
+    if (MoneyUtil.compare(saldoPendiente, 0) < 0) {
       throw new BadRequestException(
-        `El abono ($${dto.monto}) supera el saldo pendiente ($${Number(anticipo.monto) - montoAbonadoAntes})`,
+        `El abono ($${montoAbono}) supera el saldo pendiente ($${MoneyUtil.subtract(anticipo.monto, montoAbonadoAntes)})`,
       );
     }
 
     const abono = this.abonoRepo.create({
       anticipoPrestamoId: dto.anticipoPrestamoId,
       trabajadorId: dto.trabajadorId,
-      monto: dto.monto,
-      fecha: new Date(dto.fecha),
+      monto: montoAbono,
+      fecha: this.parseFechaLocalToDate(dto.fecha),
       observaciones: dto.observaciones,
     });
     await this.abonoRepo.save(abono);
 
     // Actualizar estado del anticipo
-    if (saldoPendiente <= 0) {
+    if (MoneyUtil.compare(saldoPendiente, 0) <= 0) {
       anticipo.estado = EstadoAnticipoPrestamo.PAGADO_COMPLETAMENTE;
     } else {
       anticipo.estado = EstadoAnticipoPrestamo.PAGADO_PARCIALMENTE;
@@ -305,14 +384,52 @@ export class TrabajadoresOpsService {
     return { abono, saldoPendiente };
   }
 
-  async getAnticipos(trabajadorId?: number) {
-    const where = trabajadorId ? { trabajadorId } : undefined;
+  async getAnticipos(trabajadorId?: number, fechaDesde?: string, fechaHasta?: string) {
+    const qb = this.anticipoRepo
+      .createQueryBuilder('a')
+      .leftJoinAndSelect('a.abonos', 'ab')
+      .leftJoinAndSelect('a.trabajador', 't');
 
-    return this.anticipoRepo.find({
-      where,
-      relations: ['abonos', 'trabajador'],
-      order: { fecha: 'DESC' },
-    });
+    if (trabajadorId) qb.where('a.trabajadorId = :trabajadorId', { trabajadorId });
+    if (fechaDesde || fechaHasta) {
+      const { start } = this.getDayRange(fechaDesde);
+      const { end } = this.getDayRange(fechaHasta ?? fechaDesde);
+      qb.andWhere('a.fecha >= :start AND a.fecha <= :end', { start, end });
+    }
+
+    return qb.orderBy('a.fecha', 'DESC').addOrderBy('a.id', 'DESC').getMany();
+  }
+
+  async getPagos(trabajadorId?: number, fechaDesde?: string, fechaHasta?: string) {
+    const qb = this.pagoTrabRepo
+      .createQueryBuilder('p')
+      .leftJoinAndSelect('p.trabajador', 't')
+      .leftJoinAndSelect('p.usuario', 'u');
+
+    if (trabajadorId) qb.where('p.trabajadorId = :trabajadorId', { trabajadorId });
+    if (fechaDesde || fechaHasta) {
+      const { start } = this.getDayRange(fechaDesde);
+      const { end } = this.getDayRange(fechaHasta ?? fechaDesde);
+      qb.andWhere('p.fecha >= :start AND p.fecha <= :end', { start, end });
+    }
+
+    return qb.orderBy('p.fecha', 'DESC').addOrderBy('p.id', 'DESC').getMany();
+  }
+
+  async getAbonos(trabajadorId?: number, fechaDesde?: string, fechaHasta?: string) {
+    const qb = this.abonoRepo
+      .createQueryBuilder('a')
+      .leftJoinAndSelect('a.trabajador', 't')
+      .leftJoinAndSelect('a.anticipoPrestamo', 'ap');
+
+    if (trabajadorId) qb.where('a.trabajadorId = :trabajadorId', { trabajadorId });
+    if (fechaDesde || fechaHasta) {
+      const { start } = this.getDayRange(fechaDesde);
+      const { end } = this.getDayRange(fechaHasta ?? fechaDesde);
+      qb.andWhere('a.fecha >= :start AND a.fecha <= :end', { start, end });
+    }
+
+    return qb.orderBy('a.fecha', 'DESC').addOrderBy('a.id', 'DESC').getMany();
   }
 
   async getAnticiposByTrabajador(trabajadorId: number) {

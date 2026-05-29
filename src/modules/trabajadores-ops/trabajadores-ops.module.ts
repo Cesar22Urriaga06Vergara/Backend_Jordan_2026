@@ -8,12 +8,15 @@ import {
   AnticipoPrestamo,
   AbonoDeuda,
   MovimientoCaja,
+  LaborTipo,
 } from '../../database/entities';
 import { TrabajadoresOpsController } from './trabajadores-ops.controller';
 import { TrabajadoresOpsService } from './trabajadores-ops.service';
+import { CatalogosModule } from '../catalogos/catalogos.module';
 
 @Module({
   imports: [
+    CatalogosModule,
     TypeOrmModule.forFeature([
       Trabajador,
       TrabajadorLabor,
@@ -22,6 +25,7 @@ import { TrabajadoresOpsService } from './trabajadores-ops.service';
       AnticipoPrestamo,
       AbonoDeuda,
       MovimientoCaja,
+      LaborTipo,
     ]),
   ],
   controllers: [TrabajadoresOpsController],

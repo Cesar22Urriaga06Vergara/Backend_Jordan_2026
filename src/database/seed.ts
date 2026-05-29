@@ -162,17 +162,17 @@ async function seed() {
 
     const productos = await productoRepo.save(
       productoRepo.create([
-        { codigo: 'PACA-125', nombre: 'Paca 125 ml', descripcion: 'Picadillo', categoria: 'PACA', unidad: 'PACA', activo: true },
-        { codigo: 'PACA-250', nombre: 'Paca 250 ml', descripcion: 'Normal', categoria: 'PACA', unidad: 'PACA', activo: true },
-        { codigo: 'PACA-600', nombre: 'Paca 600 ml', descripcion: 'Hielo', categoria: 'PACA', unidad: 'PACA', activo: true },
-        { codigo: 'BOTELLON-5L', nombre: 'Botellon 5 L', descripcion: 'Botellon 5 litros', categoria: 'BOTELLON', unidad: 'UNIDAD', activo: true },
-        { codigo: 'BOTELLON-6L', nombre: 'Botellon 6 L', descripcion: 'Botellon 6 litros', categoria: 'BOTELLON', unidad: 'UNIDAD', activo: true },
-        { codigo: 'RECARGA-5L', nombre: 'Recarga 5 L', descripcion: 'Recarga botellon 5 litros', categoria: 'RECARGA', unidad: 'UNIDAD', activo: true },
-        { codigo: 'RECARGA-6L', nombre: 'Recarga 6 L', descripcion: 'Recarga botellon 6 litros', categoria: 'RECARGA', unidad: 'UNIDAD', activo: true },
-        { codigo: 'GRANEL-2000', nombre: 'Agua a granel 2000', descripcion: 'Agua a granel', categoria: 'GRANEL', unidad: 'LITRO', activo: true },
-        { codigo: 'GRANEL-3000', nombre: 'Agua a granel 3000', descripcion: 'Agua a granel', categoria: 'GRANEL', unidad: 'LITRO', activo: true },
-        { codigo: 'GRANEL-4000', nombre: 'Agua a granel 4000', descripcion: 'Agua a granel', categoria: 'GRANEL', unidad: 'LITRO', activo: true },
-        { codigo: 'GRANEL-5000', nombre: 'Agua a granel 5000', descripcion: 'Agua a granel', categoria: 'GRANEL', unidad: 'LITRO', activo: true },
+        { codigo: 'PACA-125', nombre: 'Paca 125 ml', descripcion: 'Picadillo', categoria: 'PACA', unidad: 'PACA' },
+        { codigo: 'PACA-250', nombre: 'Paca 250 ml', descripcion: 'Normal', categoria: 'PACA', unidad: 'PACA' },
+        { codigo: 'PACA-600', nombre: 'Paca 600 ml', descripcion: 'Hielo', categoria: 'PACA', unidad: 'PACA' },
+        { codigo: 'BOTELLON-5L', nombre: 'Botellon 5 L', descripcion: 'Botellon 5 litros', categoria: 'BOTELLON', unidad: 'UNIDAD' },
+        { codigo: 'BOTELLON-6L', nombre: 'Botellon 6 L', descripcion: 'Botellon 6 litros', categoria: 'BOTELLON', unidad: 'UNIDAD' },
+        { codigo: 'RECARGA-5L', nombre: 'Recarga 5 L', descripcion: 'Recarga botellon 5 litros', categoria: 'RECARGA', unidad: 'UNIDAD' },
+        { codigo: 'RECARGA-6L', nombre: 'Recarga 6 L', descripcion: 'Recarga botellon 6 litros', categoria: 'RECARGA', unidad: 'UNIDAD' },
+        { codigo: 'GRANEL-2000', nombre: 'Agua a granel 2000', descripcion: 'Agua a granel', categoria: 'GRANEL', unidad: 'LITRO' },
+        { codigo: 'GRANEL-3000', nombre: 'Agua a granel 3000', descripcion: 'Agua a granel', categoria: 'GRANEL', unidad: 'LITRO' },
+        { codigo: 'GRANEL-4000', nombre: 'Agua a granel 4000', descripcion: 'Agua a granel', categoria: 'GRANEL', unidad: 'LITRO' },
+        { codigo: 'GRANEL-5000', nombre: 'Agua a granel 5000', descripcion: 'Agua a granel', categoria: 'GRANEL', unidad: 'LITRO' },
       ]),
     );
     console.log('✅ Productos creados');
@@ -189,7 +189,6 @@ async function seed() {
           direccion: 'Calle Principal 123',
           vereda: 'Centro',
           observaciones: 'Cliente de tienda con precio especial',
-          activo: true,
         },
         {
           codigo: 'CLI-0002',
@@ -200,7 +199,6 @@ async function seed() {
           direccion: 'Avenida Comercial 10',
           vereda: 'Centro',
           observaciones: 'Negocio con pedidos por ruta',
-          activo: true,
         },
         {
           codigo: 'CLI-0003',
@@ -211,7 +209,6 @@ async function seed() {
           direccion: 'Planta Jordan',
           vereda: 'Planta',
           observaciones: 'Cliente directo en purificadora',
-          activo: true,
         },
       ]),
     );
@@ -268,7 +265,6 @@ async function seed() {
             clienteId: cliente.id,
             productoId: producto.id,
             precioUnitario: tablaPrecios[cliente.codigo][producto.codigo],
-            activo: true,
           }),
         );
       }
@@ -285,7 +281,6 @@ async function seed() {
           direccion: 'Calle 10 #20-30',
           tipoTrabajador: TipoTrabajador.PERMANENTE,
           saldoTotal: 120000,
-          activo: true,
         },
         {
           codigo: 'TRAB-0002',
@@ -295,7 +290,6 @@ async function seed() {
           direccion: 'Barrio Central',
           tipoTrabajador: TipoTrabajador.DOMICILIARIO,
           saldoTotal: 0,
-          activo: true,
         },
         {
           codigo: 'TRAB-0003',
@@ -305,7 +299,6 @@ async function seed() {
           direccion: 'Vereda San Antonio',
           tipoTrabajador: TipoTrabajador.PREVENTISTA,
           saldoTotal: 0,
-          activo: true,
         },
         {
           codigo: 'TRAB-0004',
@@ -315,7 +308,6 @@ async function seed() {
           direccion: 'Vereda El Carmen',
           tipoTrabajador: TipoTrabajador.PREVENTISTA,
           saldoTotal: 0,
-          activo: true,
         },
       ]),
     );
@@ -327,7 +319,7 @@ async function seed() {
       laborTipoRepo.create([
         { nombre: 'Domiciliario Jornada', tipo: TipoLabor.POR_JORNADA, descripcion: 'Pago por jornada completa', activo: true },
         { nombre: 'Produccion Horas', tipo: TipoLabor.POR_HORA, descripcion: 'Pago proporcional por horas', activo: true },
-        { nombre: 'Preventista Por Paca', tipo: TipoLabor.POR_PACA, descripcion: 'Pago por paca vendida/entregada', activo: true },
+        { nombre: 'Pago Por Paca', tipo: TipoLabor.POR_PACA, descripcion: 'Pago por paca producida, sellada, vendida o entregada', activo: true },
         { nombre: 'Apoyo Manual', tipo: TipoLabor.MANUAL, descripcion: 'Pago manual por acuerdo', activo: true },
       ]),
     );
@@ -354,14 +346,14 @@ async function seed() {
         },
         {
           trabajadorId: trabajadoresPorCodigo['TRAB-0003'].id,
-          laborTipoId: tipoLaborPorNombre['Preventista Por Paca'].id,
+          laborTipoId: tipoLaborPorNombre['Pago Por Paca'].id,
           tarifa: 500,
           unidad: 'PACA',
           activo: true,
         },
         {
           trabajadorId: trabajadoresPorCodigo['TRAB-0004'].id,
-          laborTipoId: tipoLaborPorNombre['Preventista Por Paca'].id,
+          laborTipoId: tipoLaborPorNombre['Pago Por Paca'].id,
           tarifa: 500,
           unidad: 'PACA',
           activo: true,

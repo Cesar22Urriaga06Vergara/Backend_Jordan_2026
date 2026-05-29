@@ -1,6 +1,19 @@
 # Backend - Purificadora de Agua JORDAN
 
-Sistema de control interno para Purificadora de Agua JORDAN construido con NestJS, TypeORM y MySQL.
+Sistema de control interno para Purificadora de Agua JORDAN construido con NestJS y TypeORM.
+
+## Estado de despliegue
+
+La validacion local actual usa MySQL/MariaDB. La arquitectura oficial de
+produccion es Render + Aiven MySQL Free para mantener compatibilidad y evitar
+migraciones innecesarias.
+
+Ver tambien:
+
+- `DEPLOYMENT-ARCHITECTURE.md`
+- `DEPLOYMENT-PLAN-JORDAN.md`
+- `README_DEPLOY.md`
+- `documentacion/AUDITORIA_Y_ROADMAP.md`
 
 ## 🚀 Requisitos Previos
 
@@ -19,17 +32,20 @@ Sistema de control interno para Purificadora de Agua JORDAN construido con NestJ
 
 2. **Configurar variables de entorno**
    
-   El archivo `.env.local` ya existe con valores por defecto para desarrollo local:
+   Copia `.env.example` a `.env.local` y ajusta los valores locales. No subas
+   `.env`, `.env.local` ni secretos reales al repositorio.
+
+   Valores locales de ejemplo:
    ```
    DB_HOST=localhost
    DB_PORT=3306
-   DB_USERNAME=root
-   DB_PASSWORD=root
+   DB_USERNAME=tu_usuario_local
+   DB_PASSWORD=tu_password_local
    DB_DATABASE=jordan
-   JWT_SECRET=mi_secreto_jwt_super_seguro_para_jordan_cambiar_en_produccion
+   JWT_SECRET=dev-insecure-jwt-secret-do-not-use-in-production
    JWT_EXPIRATION=1h
    NODE_ENV=development
-   PORT=3001
+   PORT=3000
    ALLOW_REOPEN_DAY_IN_DEV=false
    ```
 

@@ -21,10 +21,14 @@ import {
   TipoMovimientoCaja,
   TipoMovimientoInventario,
 } from '../../../common/enums';
+import { MoneyUtil } from '../../../common/utils';
+import { ConsecutivoService } from '../../../common/services/consecutivo.service';
 import { CreateVentaDto, RegistrarPagoVentaDto } from './dto/ventas.dto';
 
 @Injectable()
 export class VentasService {
+  private readonly saldoMinimoCartera = 50;
+
   constructor(
     @InjectRepository(Venta) private ventaRepo: Repository<Venta>,
     @InjectRepository(DetalleVenta) private detalleRepo: Repository<DetalleVenta>,
@@ -34,17 +38,8 @@ export class VentasService {
     @InjectRepository(Cliente) private clienteRepo: Repository<Cliente>,
     @InjectRepository(Producto) private productoRepo: Repository<Producto>,
     private dataSource: DataSource,
+    private consecutivoService: ConsecutivoService,
   ) {}
-
-  private async generarNumero(prefix: string, repo: Repository<Venta | Pago>): Promise<string> {
-    const hoy = new Date();
-    const pre = `${prefix}-${hoy.getFullYear()}${String(hoy.getMonth() + 1).padStart(2, '0')}${String(hoy.getDate()).padStart(2, '0')}`;
-    const count = await (repo as Repository<Venta>)
-      .createQueryBuilder('e')
-      .where('e.numero LIKE :pre', { pre: `${pre}%` })
-      .getCount();
-    return `${pre}-${String(count + 1).padStart(3, '0')}`;
-  }
 
   private parseDateStart(value: string) {
     if (!value) return undefined;
@@ -97,6 +92,57 @@ export class VentasService {
     };
   }
 
+  async findAllForReport(
+    page = 1,
+    limit = 10,
+    clienteId?: number,
+    estado?: EstadoVenta,
+    fechaDesde?: string,
+    fechaHasta?: string,
+  ) {
+    const qb = this.ventaRepo
+      .createQueryBuilder('v')
+      .leftJoinAndSelect('v.cliente', 'c')
+      .leftJoinAndSelect('v.detalles', 'd')
+      .leftJoinAndSelect('d.producto', 'p')
+      .leftJoinAndSelect('v.pagos', 'pg')
+      .distinct(true);
+
+    if (clienteId) qb.andWhere('v.clienteId = :clienteId', { clienteId });
+    if (estado) qb.andWhere('v.estado = :estado', { estado });
+    const fechaDesdeDate = fechaDesde ? this.parseDateStart(fechaDesde) : undefined;
+    const fechaHastaDate = fechaHasta ? this.parseDateEnd(fechaHasta) : undefined;
+
+    if (fechaDesdeDate && fechaHastaDate) {
+      qb.andWhere(
+        '(v.fecha BETWEEN :fechaDesde AND :fechaHasta OR pg.fecha BETWEEN :fechaDesde AND :fechaHasta)',
+        { fechaDesde: fechaDesdeDate, fechaHasta: fechaHastaDate },
+      );
+    } else if (fechaDesdeDate) {
+      qb.andWhere('(v.fecha >= :fechaDesde OR pg.fecha >= :fechaDesde)', {
+        fechaDesde: fechaDesdeDate,
+      });
+    } else if (fechaHastaDate) {
+      qb.andWhere('(v.fecha <= :fechaHasta OR pg.fecha <= :fechaHasta)', {
+        fechaHasta: fechaHastaDate,
+      });
+    }
+
+    qb.orderBy('v.fecha', 'DESC')
+      .addOrderBy('pg.fecha', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit);
+    const [data, total] = await qb.getManyAndCount();
+    return {
+      data,
+      items: data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
   async findOne(id: number) {
     const venta = await this.ventaRepo.findOne({
       where: { id },
@@ -108,7 +154,7 @@ export class VentasService {
 
   async create(dto: CreateVentaDto) {
     const cliente = await this.clienteRepo.findOne({
-      where: { id: dto.clienteId, activo: true },
+      where: { id: dto.clienteId },
     });
     if (!cliente) throw new NotFoundException(`Cliente ${dto.clienteId} no encontrado o inactivo`);
 
@@ -131,7 +177,7 @@ export class VentasService {
         }
 
         const producto = await this.productoRepo.findOne({
-          where: { id: item.productoId, activo: true },
+          where: { id: item.productoId },
         });
         if (!producto) {
           throw new NotFoundException(`Producto ${item.productoId} no encontrado`);
@@ -142,21 +188,22 @@ export class VentasService {
           throw new BadRequestException(`Precio unitario no puede ser negativo`);
         }
 
-        const subtotal = item.cantidad * item.precioUnitario;
-        totalVenta += subtotal;
+        const precioUnitario = MoneyUtil.normalize(item.precioUnitario);
+        const subtotal = MoneyUtil.multiply(precioUnitario, item.cantidad);
+        totalVenta = MoneyUtil.add(totalVenta, subtotal);
         detallesData.push({
           productoId: item.productoId,
           cantidad: item.cantidad,
-          precioUnitario: item.precioUnitario,
+          precioUnitario,
           subtotal,
         });
       }
 
-      const montoPagado = dto.montoPagado ?? 0;
+      const montoPagado = MoneyUtil.normalize(dto.montoPagado ?? 0);
       if (montoPagado < 0) {
         throw new BadRequestException('El monto pagado no puede ser negativo');
       }
-      if (montoPagado > totalVenta) {
+      if (MoneyUtil.compare(montoPagado, totalVenta) > 0) {
         throw new BadRequestException(
           `El monto pagado inicial ($${montoPagado}) supera el total de la venta ($${totalVenta})`,
         );
@@ -165,7 +212,15 @@ export class VentasService {
         throw new BadRequestException('Se requiere tipoPago cuando hay pago inicial');
       }
 
-      const saldoPendiente = totalVenta - montoPagado;
+      const saldoPendiente = MoneyUtil.subtract(totalVenta, montoPagado);
+      if (
+        MoneyUtil.compare(saldoPendiente, 0) > 0 &&
+        MoneyUtil.compare(saldoPendiente, this.saldoMinimoCartera) < 0
+      ) {
+        throw new BadRequestException(
+          `El saldo pendiente no puede ser menor a $${this.saldoMinimoCartera}. Ajusta el pago o registra la venta a credito.`,
+        );
+      }
 
       let estadoVenta: EstadoVenta;
       if (saldoPendiente <= 0) {
@@ -178,12 +233,11 @@ export class VentasService {
 
       // Número de venta
       const hoy = new Date();
-      const numPrefix = `VEN-${hoy.getFullYear()}${String(hoy.getMonth() + 1).padStart(2, '0')}${String(hoy.getDate()).padStart(2, '0')}`;
-      const countVentas = await manager
-        .createQueryBuilder(Venta, 'v')
-        .where('v.numero LIKE :p', { p: `${numPrefix}%` })
-        .getCount();
-      const numeroVenta = `${numPrefix}-${String(countVentas + 1).padStart(3, '0')}`;
+      const numeroVenta = await this.consecutivoService.generar(
+        'VEN',
+        hoy,
+        manager,
+      );
 
       // Crear venta
       const venta = manager.create(Venta, {
@@ -194,7 +248,7 @@ export class VentasService {
         estado: estadoVenta,
         totalVenta,
         totalPagado: montoPagado,
-        saldoPendiente: Math.max(0, saldoPendiente),
+        saldoPendiente: MoneyUtil.maxZero(saldoPendiente),
       });
       const savedVenta = await manager.save(Venta, venta);
 
@@ -221,12 +275,11 @@ export class VentasService {
 
       // Pago inicial si hay monto
       if (montoPagado > 0 && dto.tipoPago) {
-        const numPagoPrefix = `PAG-${hoy.getFullYear()}${String(hoy.getMonth() + 1).padStart(2, '0')}${String(hoy.getDate()).padStart(2, '0')}`;
-        const countPagos = await manager
-          .createQueryBuilder(Pago, 'p')
-          .where('p.numero LIKE :p', { p: `${numPagoPrefix}%` })
-          .getCount();
-        const numeroPago = `${numPagoPrefix}-${String(countPagos + 1).padStart(3, '0')}`;
+        const numeroPago = await this.consecutivoService.generar(
+          'PAG',
+          hoy,
+          manager,
+        );
 
         const pago = manager.create(Pago, {
           numero: numeroPago,
@@ -245,12 +298,11 @@ export class VentasService {
             ? TipoMovimientoCaja.INGRESO_VENTA_EFECTIVO
             : TipoMovimientoCaja.INGRESO_VENTA_TRANSFERENCIA;
 
-        const numCajaPrefix = `CAJ-${hoy.getFullYear()}${String(hoy.getMonth() + 1).padStart(2, '0')}${String(hoy.getDate()).padStart(2, '0')}`;
-        const countCaja = await manager
-          .createQueryBuilder(MovimientoCaja, 'm')
-          .where('m.numero LIKE :p', { p: `${numCajaPrefix}%` })
-          .getCount();
-        const numeroCaja = `${numCajaPrefix}-${String(countCaja + 1).padStart(3, '0')}`;
+        const numeroCaja = await this.consecutivoService.generar(
+          'CAJ',
+          hoy,
+          manager,
+        );
 
         await manager.save(
           MovimientoCaja,
@@ -289,7 +341,8 @@ export class VentasService {
   }
 
   async registrarPago(ventaId: number, dto: RegistrarPagoVentaDto) {
-    const venta = await this.findOne(ventaId);
+    const venta = await this.ventaRepo.findOne({ where: { id: ventaId } });
+    if (!venta) throw new NotFoundException(`Venta con id ${ventaId} no encontrada`);
 
     if (venta.estado === EstadoVenta.COMPLETADA) {
       throw new BadRequestException(`La venta ya está completamente pagada`);
@@ -297,39 +350,75 @@ export class VentasService {
     if (venta.estado === EstadoVenta.CANCELADA) {
       throw new BadRequestException(`No se puede pagar una venta cancelada`);
     }
-    if (dto.monto > venta.saldoPendiente) {
+    const montoPago = MoneyUtil.normalize(dto.monto);
+    const saldoActual = MoneyUtil.normalize(venta.saldoPendiente);
+
+    if (MoneyUtil.compare(montoPago, saldoActual) > 0) {
       throw new BadRequestException(
-        `El monto ($${dto.monto}) supera el saldo pendiente ($${venta.saldoPendiente})`,
+        `El monto ($${montoPago}) supera el saldo pendiente ($${saldoActual})`,
       );
     }
+    const nuevoTotalPagado = MoneyUtil.add(venta.totalPagado, montoPago);
+    const nuevoSaldoPendiente = MoneyUtil.maxZero(
+      MoneyUtil.subtract(venta.saldoPendiente, montoPago),
+    );
+    if (
+      MoneyUtil.compare(nuevoSaldoPendiente, 0) > 0 &&
+      MoneyUtil.compare(nuevoSaldoPendiente, this.saldoMinimoCartera) < 0
+    ) {
+      throw new BadRequestException(
+        `El pago dejaria un saldo de $${nuevoSaldoPendiente}. Ajusta el pago para cancelar completo o deja al menos $${this.saldoMinimoCartera} en cartera.`,
+      );
+    }
+    const nuevoEstado =
+      MoneyUtil.compare(nuevoSaldoPendiente, 0) <= 0
+        ? EstadoVenta.COMPLETADA
+        : EstadoVenta.PARCIAL;
 
     return this.dataSource.transaction(async (manager) => {
+      const ventaBloqueada = await manager.findOne(Venta, {
+        where: { id: ventaId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!ventaBloqueada) throw new NotFoundException(`Venta con id ${ventaId} no encontrada`);
+      if (
+        ventaBloqueada.estado !== venta.estado ||
+        MoneyUtil.compare(ventaBloqueada.saldoPendiente, venta.saldoPendiente) !== 0 ||
+        MoneyUtil.compare(ventaBloqueada.totalPagado, venta.totalPagado) !== 0
+      ) {
+        throw new BadRequestException(
+          'La venta cambio mientras se registraba el pago. Recarga la venta e intenta nuevamente.',
+        );
+      }
+
       const hoy = new Date();
-      const prefix = `PAG-${hoy.getFullYear()}${String(hoy.getMonth() + 1).padStart(2, '0')}${String(hoy.getDate()).padStart(2, '0')}`;
-      const count = await manager
-        .createQueryBuilder(Pago, 'p')
-        .where('p.numero LIKE :p', { p: `${prefix}%` })
-        .getCount();
-      const numeroPago = `${prefix}-${String(count + 1).padStart(3, '0')}`;
+      const numeroPago = await this.consecutivoService.generar(
+        'PAG',
+        hoy,
+        manager,
+      );
 
       const pago = manager.create(Pago, {
         numero: numeroPago,
         ventaId,
         clienteId: venta.clienteId,
         tipo: dto.tipo,
-        monto: dto.monto,
+        monto: montoPago,
         fecha: hoy,
         referencia: dto.referencia,
         observaciones: dto.observaciones,
       });
       const savedPago = await manager.save(Pago, pago);
 
-      // Actualizar venta
-      venta.totalPagado = Number(venta.totalPagado) + Number(dto.monto);
-      venta.saldoPendiente = Number(venta.saldoPendiente) - Number(dto.monto);
-      venta.estado =
-        venta.saldoPendiente <= 0 ? EstadoVenta.COMPLETADA : EstadoVenta.PARCIAL;
-      await manager.save(Venta, venta);
+      // Actualizar solo columnas escalares; la venta puede tener relaciones cargadas.
+      venta.totalPagado = nuevoTotalPagado;
+      venta.saldoPendiente = nuevoSaldoPendiente;
+      venta.estado = nuevoEstado;
+      await manager.update(Venta, ventaId, {
+        totalPagado: nuevoTotalPagado,
+        saldoPendiente: nuevoSaldoPendiente,
+        estado: nuevoEstado,
+      });
 
       // Actualizar cartera
       const cartera = await manager.findOne(Cartera, {
@@ -347,12 +436,11 @@ export class VentasService {
           ? TipoMovimientoCaja.INGRESO_CARTERA_EFECTIVO
           : TipoMovimientoCaja.INGRESO_CARTERA_TRANSFERENCIA;
 
-      const cajaPrefix = `CAJ-${hoy.getFullYear()}${String(hoy.getMonth() + 1).padStart(2, '0')}${String(hoy.getDate()).padStart(2, '0')}`;
-      const cajaCnt = await manager
-        .createQueryBuilder(MovimientoCaja, 'm')
-        .where('m.numero LIKE :p', { p: `${cajaPrefix}%` })
-        .getCount();
-      const numeroCaja = `${cajaPrefix}-${String(cajaCnt + 1).padStart(3, '0')}`;
+      const numeroCaja = await this.consecutivoService.generar(
+        'CAJ',
+        hoy,
+        manager,
+      );
 
       await manager.save(
         MovimientoCaja,
@@ -360,7 +448,7 @@ export class VentasService {
           numero: numeroCaja,
           tipo: tipoMov,
           medioPago: dto.tipo,
-          monto: dto.monto,
+          monto: montoPago,
           fecha: hoy,
           pagoId: savedPago.id,
           clienteId: venta.clienteId,

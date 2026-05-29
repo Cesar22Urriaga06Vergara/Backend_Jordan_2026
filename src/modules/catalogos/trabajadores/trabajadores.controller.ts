@@ -4,6 +4,7 @@ import {
   Post,
   Put,
   Patch,
+  Delete,
   Param,
   Body,
   Query,
@@ -57,5 +58,10 @@ export class TrabajadoresController {
   @Patch(':id/toggle-activo')
   toggleActivo(@Param('id', ParseIntPipe) id: number) {
     return this.trabajadoresService.toggleActivo(id);
+  }
+
+  @Delete(':id')
+  remove(@Param('id', ParseIntPipe) id: number) {
+    return this.trabajadoresService.remove(id);
   }
 }

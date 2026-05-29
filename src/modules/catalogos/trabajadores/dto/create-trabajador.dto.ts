@@ -7,9 +7,10 @@ import {
   IsNumber,
   IsIn,
   Min,
+  Max,
   MaxLength,
 } from 'class-validator';
-import { TipoLabor, TipoTrabajador } from '../../../../common/enums';
+import { TipoLabor } from '../../../../common/enums';
 
 export class CreateTrabajadorDto {
   @IsString()
@@ -37,8 +38,15 @@ export class CreateTrabajadorDto {
   @MaxLength(200)
   direccion?: string;
 
-  @IsEnum(TipoTrabajador)
-  tipoTrabajador: TipoTrabajador;
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(80)
+  tipoTrabajador: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  cargo?: string;
 
   @IsOptional()
   @IsBoolean()
@@ -46,16 +54,18 @@ export class CreateTrabajadorDto {
 
   @IsOptional()
   @IsEnum(TipoLabor)
-  @IsIn([TipoLabor.POR_JORNADA, TipoLabor.POR_HORA])
+  @IsIn([TipoLabor.POR_JORNADA, TipoLabor.POR_HORA, TipoLabor.POR_PACA])
   modalidadPago?: TipoLabor;
 
   @IsOptional()
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0.01)
+  @Max(99999999)
   valorPago?: number;
 
   @IsOptional()
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0.01)
+  @Max(24)
   horasBase?: number;
 }

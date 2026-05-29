@@ -14,6 +14,11 @@ import { ClientesService } from './clientes.service';
 import { CreateClienteDto } from './dto/create-cliente.dto';
 import { UpdateClienteDto } from './dto/update-cliente.dto';
 import { UpsertPrecioClienteDto } from './dto/upsert-precio.dto';
+import { CurrentUser } from '../../../common/decorators';
+
+interface AuthUser {
+  id: number;
+}
 
 @Controller('catalogos/clientes')
 export class ClientesController {
@@ -44,21 +49,25 @@ export class ClientesController {
   }
 
   @Post()
-  create(@Body() dto: CreateClienteDto) {
-    return this.clientesService.create(dto);
+  create(@Body() dto: CreateClienteDto, @CurrentUser() user: AuthUser) {
+    return this.clientesService.create({ ...dto, usuarioId: user.id });
   }
 
   @Put(':id')
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateClienteDto,
+    @CurrentUser() user: AuthUser,
   ) {
-    return this.clientesService.update(id, dto);
+    return this.clientesService.update(id, { ...dto, usuarioId: user.id });
   }
 
   @Patch(':id/toggle-activo')
-  toggleActivo(@Param('id', ParseIntPipe) id: number) {
-    return this.clientesService.toggleActivo(id);
+  toggleActivo(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.clientesService.toggleActivo(id, user.id);
   }
 
   @Get(':id/precios')
@@ -75,7 +84,7 @@ export class ClientesController {
   }
 
   @Delete(':id')
-  delete(@Param('id', ParseIntPipe) id: number) {
-    return this.clientesService.delete(id);
+  delete(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
+    return this.clientesService.delete(id, user.id);
   }
 }

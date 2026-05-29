@@ -1,4 +1,4 @@
-import { IsNumber, IsPositive, IsOptional, IsString, IsDateString, IsArray, IsBoolean, ValidateNested, IsIn } from 'class-validator';
+import { IsNumber, IsPositive, IsOptional, IsString, IsDateString, IsArray, IsBoolean, ValidateNested, IsIn, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateRutaDto {
@@ -26,24 +26,36 @@ export class AgregarPedidoRutaDto {
 }
 
 export class LiquidarRutaDto {
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(99999999)
   totalEntregado: number;
 
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(99999999)
   totalRecaudado: number;
 
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(99999999)
   totalCartera: number;
 
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(-99999999)
+  @Max(99999999)
   diferencia: number;
 
   @IsOptional()
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(99999999)
   efectivoRecibido?: number;
 
   @IsOptional()
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(99999999)
   transferenciaRecibida?: number;
 
   @IsOptional()
@@ -58,7 +70,8 @@ export class LiquidarRutaDto {
 }
 
 export class PedidoEntregaDto {
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 0 })
+  @IsPositive()
   pedidoId: number;
 
   @IsBoolean()
@@ -74,11 +87,15 @@ export class PedidoEntregaDto {
   tipoPago?: 'EFECTIVO' | 'TRANSFERENCIA' | 'AMBOS';
 
   @IsOptional()
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(99999999)
   montoEfectivo?: number;
 
   @IsOptional()
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(99999999)
   montoTransferencia?: number;
 }
 
