@@ -75,6 +75,11 @@ export class RutasController {
     return this.rutasService.cambiarEstado(id, dto);
   }
 
+  @Delete(':id')
+  remove(@Param('id', ParseIntPipe) id: number) {
+    return this.rutasService.remove(id);
+  }
+
   @Post(':id/liquidar')
   liquidar(
     @Param('id', ParseIntPipe) id: number,

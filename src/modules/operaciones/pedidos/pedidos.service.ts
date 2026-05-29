@@ -8,11 +8,16 @@ import { DataSource, Repository } from 'typeorm';
 import {
   Pedido,
   DetallePedido,
+  ItemRuta,
   Cliente,
   Producto,
   MovimientoInventario,
 } from '../../../database/entities';
-import { EstadoPedido, TipoMovimientoInventario } from '../../../common/enums';
+import {
+  EstadoPedido,
+  EstadoRuta,
+  TipoMovimientoInventario,
+} from '../../../common/enums';
 import { CreatePedidoDto } from './dto/create-pedido.dto';
 import { CambioEstadoPedidoDto } from './dto/cambio-estado-pedido.dto';
 import { ConsecutivoService } from '../../../common/services/consecutivo.service';
@@ -279,6 +284,50 @@ export class PedidosService {
         where: { id },
         relations: ['cliente', 'detalles', 'detalles.producto', 'ventas'],
       });
+    });
+  }
+
+  async remove(id: number) {
+    return this.dataSource.transaction(async (manager) => {
+      const pedido = await manager.findOne(Pedido, {
+        where: { id },
+        relations: ['ventas', 'itemsRuta', 'itemsRuta.ruta'],
+      });
+      if (!pedido) throw new NotFoundException(`Pedido con id ${id} no encontrado`);
+
+      if ((pedido.ventas ?? []).length > 0) {
+        throw new BadRequestException(
+          `No se puede eliminar el pedido ${pedido.numero}: ya tiene venta asociada`,
+        );
+      }
+
+      const estadosEliminables = [
+        EstadoPedido.PENDIENTE,
+        EstadoPedido.CARGADO_EN_RUTA,
+      ];
+      if (!estadosEliminables.includes(pedido.estado)) {
+        throw new BadRequestException(
+          `No se puede eliminar un pedido en estado ${pedido.estado}. Use cancelar/anular para conservar el historial.`,
+        );
+      }
+
+      const rutaBloqueante = (pedido.itemsRuta ?? []).find(
+        (item) =>
+          item.ruta &&
+          item.ruta.estado !== EstadoRuta.CREADA &&
+          item.ruta.estado !== EstadoRuta.CARGADA,
+      );
+      if (rutaBloqueante?.ruta) {
+        throw new BadRequestException(
+          `No se puede eliminar el pedido ${pedido.numero}: la ruta ${rutaBloqueante.ruta.numero} esta en estado ${rutaBloqueante.ruta.estado}`,
+        );
+      }
+
+      await manager.delete(ItemRuta, { pedidoId: id });
+      await manager.delete(DetallePedido, { pedidoId: id });
+      await manager.delete(Pedido, { id });
+
+      return { message: `Pedido ${pedido.numero} eliminado correctamente` };
     });
   }
 

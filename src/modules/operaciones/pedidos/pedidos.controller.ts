@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Param,
   Body,
   Query,
@@ -61,5 +62,10 @@ export class PedidosController {
     @Body() dto: CambioEstadoPedidoDto,
   ) {
     return this.pedidosService.cambiarEstado(id, dto);
+  }
+
+  @Delete(':id')
+  remove(@Param('id', ParseIntPipe) id: number) {
+    return this.pedidosService.remove(id);
   }
 }

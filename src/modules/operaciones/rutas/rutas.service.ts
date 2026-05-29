@@ -257,6 +257,60 @@ export class RutasService {
     return { message: 'Pedido removido de la ruta' };
   }
 
+  async remove(id: number) {
+    return this.rutaRepo.manager.transaction(async (manager) => {
+      const ruta = await manager.findOne(Ruta, {
+        where: { id },
+        relations: ['itemsRuta', 'itemsRuta.pedido', 'liquidacion'],
+      });
+      if (!ruta) throw new NotFoundException(`Ruta ${id} no encontrada`);
+
+      if (ruta.liquidacion) {
+        throw new BadRequestException(
+          `No se puede eliminar la ruta ${ruta.numero}: ya tiene liquidacion asociada`,
+        );
+      }
+
+      if (ruta.estado !== EstadoRuta.CREADA && ruta.estado !== EstadoRuta.CARGADA) {
+        throw new BadRequestException(
+          `No se puede eliminar una ruta en estado ${ruta.estado}. Use anular para conservar el historial.`,
+        );
+      }
+
+      const pedidos = (ruta.itemsRuta ?? [])
+        .map((item) => item.pedido)
+        .filter(Boolean);
+      const pedidoBloqueante = pedidos.find(
+        (pedido) =>
+          pedido.estado !== EstadoPedido.PENDIENTE &&
+          pedido.estado !== EstadoPedido.CARGADO_EN_RUTA,
+      );
+      if (pedidoBloqueante) {
+        throw new BadRequestException(
+          `No se puede eliminar la ruta ${ruta.numero}: el pedido ${pedidoBloqueante.numero} esta en estado ${pedidoBloqueante.estado}`,
+        );
+      }
+
+      const pedidoIds = pedidos.map((pedido) => pedido.id);
+      if (pedidoIds.length > 0) {
+        await manager.update(
+          Pedido,
+          { id: In(pedidoIds) },
+          {
+            rutaId: null as any,
+            esDeRuta: false,
+            estado: EstadoPedido.PENDIENTE,
+          },
+        );
+      }
+
+      await manager.delete(ItemRuta, { rutaId: id });
+      await manager.delete(Ruta, { id });
+
+      return { message: `Ruta ${ruta.numero} eliminada correctamente` };
+    });
+  }
+
   async cambiarEstado(id: number, dto: CambioEstadoRutaDto) {
     const ruta = await this.findOne(id);
     const estadoActual = ruta.estado;
